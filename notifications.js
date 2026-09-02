@@ -1,9 +1,10 @@
-import { NativeModules } from "react-native";
+import { NativeModules, Platform } from "react-native";
+import Constants from "expo-constants";
+import * as ExpoNotifications from "expo-notifications";
+import * as Device from "expo-device";
 
-// Check if notifee native module exists BEFORE loading @notifee/react-native.
-// Loading notifee triggers module-scope AppRegistry.registerHeadlessTask calls
-// that corrupt the app registry when the native module isn't present, causing
-// the "main has not been registered" crash.
+// ---------- Notifee (dev client only) ----------
+
 const hasNotifeeNative = !!NativeModules.NotifeeApiModule;
 
 let notifee = null;
@@ -21,36 +22,96 @@ if (hasNotifeeNative) {
   } catch (e) {
     console.warn("[notifications] Failed to load notifee:", e.message);
   }
-} else {
-  console.warn(
-    "[notifications] Notifee native module not found — notifications disabled.",
-    "Build a dev client with `npx expo run:android` to enable notifications."
-  );
 }
 
+// When notifee isn't available (Expo Go), we fall back to expo-notifications.
+const useExpoFallback = !notifee;
+
+if (useExpoFallback) {
+  console.log("[notifications] Using expo-notifications fallback (Expo Go mode).");
+}
+
+// ---------- Permission ----------
+
+async function requestPermission() {
+  if (!Device.isDevice) {
+    console.warn("[notifications] Must use a physical device for push notifications.");
+    return false;
+  }
+
+  const { status: existingStatus } = await ExpoNotifications.getPermissionsAsync();
+  let finalStatus = existingStatus;
+
+  if (existingStatus !== "granted") {
+    const { status } = await ExpoNotifications.requestPermissionsAsync();
+    finalStatus = status;
+  }
+
+  if (finalStatus !== "granted") {
+    console.warn("[notifications] Permission not granted.");
+    return false;
+  }
+
+  return true;
+}
+
+// ---------- Expo-notifications setup ----------
+
+// Configure how notifications appear when app is in foreground
+ExpoNotifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
+
 const TICKER_NOTIFICATION_ID = "nifty-sensex-ticker";
+// Bundled at build time from assets/sounds/notify.mp3 → android/res/raw/notify.mp3
+const CROSS_ALERT_SOUND =
+  Constants.expoConfig?.extra?.CROSS_ALERT_SOUND || "notify";
+const CROSS_ALERTS_CHANNEL_ID = "cross-alerts";
 
 // ---------- Channels ----------
 
 export async function setupChannels() {
-  if (!notifee) return;
+  // Always request permission
+  await requestPermission();
 
-  // Silent, persistent channel for the live price ticker (Spotify-style)
-  await notifee.createChannel({
-    id: "ticker",
-    name: "Live Price Ticker",
-    importance: AndroidImportance.LOW,
-    visibility: AndroidVisibility.PUBLIC,
-  });
+  if (Platform.OS === "android") {
+    // Set up Android notification channels via expo-notifications
+    await ExpoNotifications.setNotificationChannelAsync("ticker", {
+      name: "Live Price Ticker",
+      importance: ExpoNotifications.AndroidImportance.LOW,
+      lockscreenVisibility: ExpoNotifications.AndroidNotificationVisibility.PUBLIC,
+    });
 
-  // High-importance channel with custom sound for actual cross alerts
-  await notifee.createChannel({
-    id: "cross-alerts",
-    name: "Cross Alerts",
-    importance: AndroidImportance.HIGH,
-    sound: "cross_alert",
-    visibility: AndroidVisibility.PUBLIC,
-  });
+    await ExpoNotifications.setNotificationChannelAsync(CROSS_ALERTS_CHANNEL_ID, {
+      name: "Cross Alerts",
+      importance: ExpoNotifications.AndroidImportance.HIGH,
+      sound: CROSS_ALERT_SOUND,
+      lockscreenVisibility: ExpoNotifications.AndroidNotificationVisibility.PUBLIC,
+    });
+  }
+
+  if (notifee) {
+    await notifee.createChannel({
+      id: "ticker",
+      name: "Live Price Ticker",
+      importance: AndroidImportance.LOW,
+      visibility: AndroidVisibility.PUBLIC,
+    });
+
+    await notifee.createChannel({
+      id: CROSS_ALERTS_CHANNEL_ID,
+      name: "Cross Alerts",
+      importance: AndroidImportance.HIGH,
+      sound: CROSS_ALERT_SOUND,
+      visibility: AndroidVisibility.PUBLIC,
+    });
+  }
 }
 
 // ---------- Persistent ticker notification ----------
@@ -60,73 +121,97 @@ function formatNumber(n) {
   return n.toLocaleString("en-IN", { maximumFractionDigits: 1 });
 }
 
+function formatTickerTitle(data) {
+  const time = data.session?.formattedTime || "06:00:00";
+  const crosses = data.session?.crossCount ?? 0;
+  return `⏱️ ${time}  |  ⚡ Crosses: ${crosses}`;
+}
+
 function formatTickerBody(data) {
   const fmt = (d) => {
     if (!d || !d.price) return "--";
-    const arrow = d.direction === "above" ? "^" : "v";
+    const arrow = d.direction === "above" ? "▲" : "▼";
     return `${formatNumber(d.price)} ${arrow}`;
   };
 
-  const n = data.NIFTY;
-  const s = data.SENSEX;
-
-  return `NIFTY: ${fmt(n)}  |  SENSEX: ${fmt(s)}`;
+  return `NIFTY: ${fmt(data.NIFTY)}  |  SENSEX: ${fmt(data.SENSEX)}`;
 }
 
 function formatTickerSubText(data) {
   const parts = [];
   if (data.NIFTY?.vwap) {
-    parts.push(`N: VWAP ${formatNumber(data.NIFTY.vwap)} EMA9 ${formatNumber(data.NIFTY.ema9)}`);
+    parts.push(`N: VWAP ${formatNumber(data.NIFTY.vwap)} EMA ${formatNumber(data.NIFTY.ema9)}`);
   }
   if (data.SENSEX?.vwap) {
-    parts.push(`S: VWAP ${formatNumber(data.SENSEX.vwap)} EMA9 ${formatNumber(data.SENSEX.ema9)}`);
+    parts.push(`S: VWAP ${formatNumber(data.SENSEX.vwap)} EMA ${formatNumber(data.SENSEX.ema9)}`);
   }
   return parts.join("  |  ");
 }
 
 export async function showOrUpdateTickerNotification(data) {
-  if (!notifee) return;
-
-  await notifee.displayNotification({
-    id: TICKER_NOTIFICATION_ID,
-    title: "NIFTY / SENSEX Live",
-    body: formatTickerBody(data),
-    subtitle: formatTickerSubText(data),
-    android: {
-      channelId: "ticker",
-      asForegroundService: true,
-      ongoing: true,
-      smallIcon: "ic_notification",
-      color: "#1DB954",
-      onlyAlertOnce: true,
-    },
-  });
+  if (notifee) {
+    // Notifee: persistent foreground service notification
+    await notifee.displayNotification({
+      id: TICKER_NOTIFICATION_ID,
+      title: formatTickerTitle(data),
+      body: formatTickerBody(data),
+      subtitle: formatTickerSubText(data),
+      android: {
+        channelId: "ticker",
+        asForegroundService: true,
+        ongoing: true,
+        smallIcon: "ic_notification",
+        color: "#1DB954",
+        onlyAlertOnce: true,
+      },
+    });
+  }
+  // Expo Go fallback: we don't spam ticker updates as individual notifications
+  // since expo-notifications can't do persistent/ongoing notifications.
+  // The ticker notification is skipped; only cross alerts fire.
 }
 
 // ---------- Cross alert notification ----------
 
 export async function showCrossAlert({ label, cross, price, vwap, ema }) {
-  if (!notifee) return;
-
   const direction = cross === "bullish" ? "crossed ABOVE" : "crossed BELOW";
+  const title = `${label} EMA9/VWAP Cross`;
+  const body = `EMA9 ${direction} VWAP\nPrice ${formatNumber(price)} | VWAP ${formatNumber(vwap)} | EMA9 ${formatNumber(ema)}`;
 
-  await notifee.displayNotification({
-    title: `${label} EMA9/VWAP Cross`,
-    body: `EMA9 ${direction} VWAP\nPrice ${formatNumber(price)} | VWAP ${formatNumber(vwap)} | EMA9 ${formatNumber(ema)}`,
-    android: {
-      channelId: "cross-alerts",
-      importance: AndroidImportance.HIGH,
-      sound: "cross_alert",
-      pressAction: { id: "default" },
-    },
-  });
+  if (notifee) {
+    await notifee.displayNotification({
+      title,
+      body,
+      android: {
+        channelId: CROSS_ALERTS_CHANNEL_ID,
+        importance: AndroidImportance.HIGH,
+        sound: CROSS_ALERT_SOUND,
+        pressAction: { id: "default" },
+      },
+    });
+  } else {
+    // Expo Go fallback
+    await ExpoNotifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        sound: Platform.OS === "android" ? CROSS_ALERT_SOUND : true,
+        priority: ExpoNotifications.AndroidNotificationPriority.HIGH,
+        ...(Platform.OS === "android" ? { channelId: CROSS_ALERTS_CHANNEL_ID } : {}),
+      },
+      trigger: null, // fire immediately
+    });
+  }
 }
 
 // ---------- Cleanup ----------
 
 export async function cancelTickerNotification() {
-  if (!notifee) return;
-  await notifee.cancelNotification(TICKER_NOTIFICATION_ID);
+  if (notifee) {
+    await notifee.cancelNotification(TICKER_NOTIFICATION_ID);
+  }
+  // expo-notifications: dismiss all (only relevant if we ever showed one)
+  await ExpoNotifications.dismissAllNotificationsAsync();
 }
 
 // ---------- Foreground event handler ----------

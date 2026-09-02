@@ -99,8 +99,10 @@ function IndexCard({ label, data }) {
 export default function App() {
   const [status, setStatus] = useState("Not started");
   const [running, setRunning] = useState(false);
-  const [nifty, setNifty] = useState(getData().NIFTY);
-  const [sensex, setSensex] = useState(getData().SENSEX);
+  const initialData = getData();
+  const [nifty, setNifty] = useState(initialData.NIFTY);
+  const [sensex, setSensex] = useState(initialData.SENSEX);
+  const [session, setSession] = useState(initialData.session);
   const [lastCross, setLastCross] = useState(null);
   const [hasApiKey, setHasApiKey] = useState(true);
 
@@ -115,6 +117,10 @@ export default function App() {
     onData((d) => {
       setNifty(d.NIFTY);
       setSensex(d.SENSEX);
+      setSession(d.session);
+      if (d.session) {
+        setRunning(d.session.running);
+      }
     });
 
     onCross((crossEvent) => {
@@ -136,8 +142,10 @@ export default function App() {
     await stopTicker();
     setRunning(false);
     setStatus("Stopped");
-    setNifty(getData().NIFTY);
-    setSensex(getData().SENSEX);
+    const current = getData();
+    setNifty(current.NIFTY);
+    setSensex(current.SENSEX);
+    setSession(current.session);
   }
 
   return (
@@ -152,6 +160,19 @@ export default function App() {
               Set INDMONEY_API_KEY in your .env file{"\n"}
               (INDstocks access token from indstocks.com)
             </Text>
+          </View>
+        )}
+
+        {running && session && (
+          <View style={styles.sessionBar}>
+            <View style={styles.sessionBox}>
+              <Text style={styles.sessionLabel}>6H Session Timer</Text>
+              <Text style={styles.sessionValue}>⏱️ {session.formattedTime}</Text>
+            </View>
+            <View style={styles.sessionBox}>
+              <Text style={styles.sessionLabel}>Crossovers</Text>
+              <Text style={styles.sessionValueCount}>⚡ {session.crossCount}</Text>
+            </View>
           </View>
         )}
 
@@ -186,23 +207,23 @@ export default function App() {
             onPress={handleStart}
             disabled={!hasApiKey}
           >
-            <Text style={styles.buttonText}>Start Monitoring</Text>
+            <Text style={styles.buttonText}>Start 6-Hour Monitoring</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
             style={[styles.button, styles.stopButton]}
             onPress={handleStop}
           >
-            <Text style={styles.buttonText}>Stop</Text>
+            <Text style={styles.buttonText}>Stop Monitoring</Text>
           </TouchableOpacity>
         )}
 
         <Text style={styles.status}>{status}</Text>
 
         <Text style={styles.hint}>
-          Tracks NIFTY 50 and SENSEX in real-time using INDstocks WebSocket.
-          Computes VWAP and EMA9 on 5-minute candles. Alerts when EMA9 crosses
-          VWAP. Runs as a foreground service with persistent notification.
+          Tracks NIFTY 50 and SENSEX in real-time using INDstocks WebSocket for 6 hours.
+          Computes VWAP and EMA9 on 5-minute candles. Plays instant sound alerts when EMA9 crosses
+          VWAP and tracks total crossover count in the persistent top notification panel.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -228,6 +249,38 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#7d8590",
     marginBottom: 20,
+  },
+  sessionBar: {
+    flexDirection: "row",
+    gap: 12,
+    width: "100%",
+    marginBottom: 16,
+  },
+  sessionBox: {
+    flex: 1,
+    backgroundColor: "#161b22",
+    borderColor: "#238636",
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    alignItems: "center",
+  },
+  sessionLabel: {
+    fontSize: 11,
+    color: "#8b949e",
+    marginBottom: 4,
+    textTransform: "uppercase",
+    fontWeight: "600",
+  },
+  sessionValue: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#58a6ff",
+  },
+  sessionValueCount: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#2ea043",
   },
   cardsRow: {
     flexDirection: "row",

@@ -24,6 +24,12 @@ import {
 
 // ---------- State ----------
 
+const SESSION_DURATION_MS = 6 * 60 * 60 * 1000; // 6 hours
+let sessionStartTime = null;
+let crossCount = 0;
+let sessionTimer = null;
+let sessionRunning = false;
+
 const state = {
   NIFTY: createIndicatorState(),
   SENSEX: createIndicatorState(),
@@ -40,6 +46,35 @@ let onCrossCallback = null;
 let onStatusCallback = null;
 
 // ---------- Helpers ----------
+
+function formatDuration(ms) {
+  if (ms <= 0) return "00:00:00";
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
+}
+
+function getSessionInfo() {
+  if (!sessionRunning || !sessionStartTime) {
+    return {
+      running: false,
+      crossCount: crossCount,
+      remainingMs: SESSION_DURATION_MS,
+      formattedTime: "06:00:00",
+    };
+  }
+  const elapsed = Date.now() - sessionStartTime;
+  const remaining = Math.max(0, SESSION_DURATION_MS - elapsed);
+  return {
+    running: true,
+    crossCount: crossCount,
+    remainingMs: remaining,
+    formattedTime: formatDuration(remaining),
+  };
+}
 
 function getISTNow() {
   // IST is UTC+5:30 (19800000 ms). Avoid toLocaleString parsing which
@@ -217,31 +252,21 @@ function handleQuote(msg) {
 
   // Detect cross
   const cross = detectCross(prevEMA, prevVWAP, state[label].ema9, state[label].vwap);
-  if (cross && onCrossCallback) {
-    onCrossCallback({
+  if (cross) {
+    crossCount++;
+    const crossPayload = {
       label,
       cross,
       price: latestPrices[label].price,
       vwap: round2(state[label].vwap),
       ema: round2(state[label].ema9),
-    });
+    };
+    if (onCrossCallback) onCrossCallback(crossPayload);
+    showCrossAlert(crossPayload);
   }
 
   // Update notification
-  showOrUpdateTickerNotification({
-    NIFTY: {
-      price: latestPrices.NIFTY.price,
-      direction: latestPrices.NIFTY.direction,
-      vwap: round2(state.NIFTY.vwap),
-      ema9: round2(state.NIFTY.ema9),
-    },
-    SENSEX: {
-      price: latestPrices.SENSEX.price,
-      direction: latestPrices.SENSEX.direction,
-      vwap: round2(state.SENSEX.vwap),
-      ema9: round2(state.SENSEX.ema9),
-    },
-  });
+  showOrUpdateTickerNotification(getData());
 
   // Notify UI
   if (onDataCallback) {
@@ -273,32 +298,22 @@ function handleRESTPoll({ NIFTY: nPrice, SENSEX: sPrice }) {
       }
 
       const cross = detectCross(prevEMA, prevVWAP, state[label].ema9, state[label].vwap);
-      if (cross && onCrossCallback) {
-        onCrossCallback({
+      if (cross) {
+        crossCount++;
+        const crossPayload = {
           label,
           cross,
           price,
           vwap: round2(state[label].vwap),
           ema: round2(state[label].ema9),
-        });
+        };
+        if (onCrossCallback) onCrossCallback(crossPayload);
+        showCrossAlert(crossPayload);
       }
     }
   }
 
-  showOrUpdateTickerNotification({
-    NIFTY: {
-      price: latestPrices.NIFTY.price,
-      direction: latestPrices.NIFTY.direction,
-      vwap: round2(state.NIFTY.vwap),
-      ema9: round2(state.NIFTY.ema9),
-    },
-    SENSEX: {
-      price: latestPrices.SENSEX.price,
-      direction: latestPrices.SENSEX.direction,
-      vwap: round2(state.SENSEX.vwap),
-      ema9: round2(state.SENSEX.ema9),
-    },
-  });
+  showOrUpdateTickerNotification(getData());
 
   if (onDataCallback) onDataCallback(getData());
 }
@@ -327,6 +342,7 @@ export function getData() {
       vwap: round2(state.SENSEX.vwap),
       ema9: round2(state.SENSEX.ema9),
     },
+    session: getSessionInfo(),
   };
 }
 
@@ -347,6 +363,11 @@ export async function startTicker() {
 
   await setupChannels();
 
+  // Reset 6-hour session counters
+  sessionStartTime = Date.now();
+  sessionRunning = true;
+  crossCount = 0;
+
   // Bootstrap from historical data
   if (onStatusCallback) onStatusCallback("Fetching historical data...");
   await Promise.all([
@@ -355,20 +376,21 @@ export async function startTicker() {
   ]);
 
   // Show initial notification
-  showOrUpdateTickerNotification({
-    NIFTY: {
-      price: latestPrices.NIFTY.price,
-      direction: latestPrices.NIFTY.direction,
-      vwap: round2(state.NIFTY.vwap),
-      ema9: round2(state.NIFTY.ema9),
-    },
-    SENSEX: {
-      price: latestPrices.SENSEX.price,
-      direction: latestPrices.SENSEX.direction,
-      vwap: round2(state.SENSEX.vwap),
-      ema9: round2(state.SENSEX.ema9),
-    },
-  });
+  showOrUpdateTickerNotification(getData());
+
+  // Start 1-second session timer loop to update countdown & auto-stop after 6 hours
+  if (sessionTimer) clearInterval(sessionTimer);
+  sessionTimer = setInterval(() => {
+    if (!sessionRunning) return;
+    const session = getSessionInfo();
+    if (session.remainingMs <= 0) {
+      stopTicker();
+      if (onStatusCallback) onStatusCallback("6-Hour Session Completed");
+      return;
+    }
+    showOrUpdateTickerNotification(getData());
+    if (onDataCallback) onDataCallback(getData());
+  }, 1000);
 
   // Connect WebSocket
   if (onStatusCallback) onStatusCallback("Connecting to live feed...");
@@ -379,10 +401,12 @@ export async function startTicker() {
     handleQuote,
     () => {
       subscribeToInstruments(instruments);
-      if (onStatusCallback) onStatusCallback("Connected — monitoring");
+      if (onStatusCallback) onStatusCallback("Connected — 6h monitoring active");
     },
     () => {
-      if (onStatusCallback) onStatusCallback("Disconnected — reconnecting...");
+      if (onStatusCallback) {
+        onStatusCallback("REST polling active (WebSocket reconnecting…)");
+      }
     }
   );
 
@@ -395,6 +419,13 @@ export async function startTicker() {
 }
 
 export async function stopTicker() {
+  if (sessionTimer) {
+    clearInterval(sessionTimer);
+    sessionTimer = null;
+  }
+  sessionRunning = false;
+  sessionStartTime = null;
+
   disconnectPriceFeed();
   stopRESTPolling();
   await cancelTickerNotification();

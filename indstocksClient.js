@@ -73,24 +73,67 @@ export async function fetchInstruments(source = "index") {
 let ws = null;
 let reconnectTimeout = null;
 let reconnectDelay = 1000;
+let intentionalDisconnect = false;
 const MAX_RECONNECT_DELAY = 30000;
 
+function describeCloseCode(code) {
+  const known = {
+    1000: "normal closure",
+    1001: "going away",
+    1002: "protocol error",
+    1003: "unsupported data",
+    1006: "abnormal closure",
+    1007: "invalid payload",
+    1008: "policy violation (check API token)",
+    1009: "message too big",
+    1011: "server error",
+    1015: "TLS handshake failed",
+  };
+  return known[code] || `code ${code}`;
+}
+
+function parseWsMessage(raw) {
+  if (raw == null || raw === "") return null;
+  if (typeof raw === "object") return raw;
+
+  const text = String(raw).trim();
+  if (!text || text === "ping" || text === "pong") return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 export function connectPriceFeed(onQuote, onConnect, onDisconnect) {
+  if (!API_TOKEN?.trim()) {
+    console.warn("[WS] Skipping WebSocket — missing API token (REST polling still active)");
+    if (onDisconnect) onDisconnect();
+    return null;
+  }
+
+  intentionalDisconnect = false;
+
   if (ws) {
     ws.close();
     ws = null;
   }
 
   const isWeb = typeof window !== "undefined" && typeof window.document !== "undefined";
-  if (isWeb) {
-    // Browsers cannot set custom headers on WebSocket connections, so we
-    // connect without the auth header. The feed may not authenticate on web;
-    // the REST polling fallback still keeps prices/alerts working.
-    ws = new WebSocket(INDSTOCKS_WS_URL);
-  } else {
-    ws = new WebSocket(INDSTOCKS_WS_URL, [], {
-      headers: { Authorization: API_TOKEN },
-    });
+  try {
+    if (isWeb) {
+      // Browsers cannot set custom headers on WebSocket connections.
+      ws = new WebSocket(INDSTOCKS_WS_URL);
+    } else {
+      ws = new WebSocket(INDSTOCKS_WS_URL, null, {
+        headers: { Authorization: API_TOKEN.trim() },
+      });
+    }
+  } catch (err) {
+    console.warn("[WS] Failed to create WebSocket:", err.message);
+    if (!intentionalDisconnect) scheduleReconnect(onQuote, onConnect, onDisconnect);
+    return null;
   }
 
   ws.onopen = () => {
@@ -100,26 +143,27 @@ export function connectPriceFeed(onQuote, onConnect, onDisconnect) {
   };
 
   ws.onmessage = (event) => {
-    try {
-      const msg = JSON.parse(event.data);
+    const msg = parseWsMessage(event.data);
+    if (!msg) return;
 
-      // Ignore heartbeats
-      if (msg.type === "heartbeat" || msg.ping) return;
+    // Ignore heartbeats
+    if (msg.type === "heartbeat" || msg.ping) return;
 
-      if (msg.mode && msg.instrument && msg.data) {
-        if (onQuote) onQuote(msg);
-      }
-    } catch (err) {
-      console.error("[WS] Failed to parse message:", err);
+    if (msg.mode && msg.instrument && msg.data) {
+      if (onQuote) onQuote(msg);
     }
   };
 
-  ws.onerror = (err) => {
-    console.error("[WS] Error:", err.message || err);
+  ws.onerror = () => {
+    // RN/Web only expose a generic Event here; onclose carries the useful details.
   };
 
-  ws.onclose = () => {
-    console.log("[WS] Disconnected — reconnecting in", reconnectDelay, "ms");
+  ws.onclose = (event) => {
+    const detail = event.reason || describeCloseCode(event.code);
+    console.warn(`[WS] Disconnected (${event.code}: ${detail})`);
+
+    if (intentionalDisconnect) return;
+
     if (onDisconnect) onDisconnect();
     scheduleReconnect(onQuote, onConnect, onDisconnect);
   };
@@ -128,16 +172,25 @@ export function connectPriceFeed(onQuote, onConnect, onDisconnect) {
 }
 
 function scheduleReconnect(onQuote, onConnect, onDisconnect) {
+  if (intentionalDisconnect || !API_TOKEN?.trim()) return;
+
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
   reconnectTimeout = setTimeout(() => {
     reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+    console.log("[WS] Reconnecting in", reconnectDelay, "ms");
     connectPriceFeed(onQuote, onConnect, onDisconnect);
   }, reconnectDelay);
 }
 
+let lastSubscribeWarnAt = 0;
+
 export function subscribeToInstruments(instruments) {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
-    console.warn("[WS] Cannot subscribe — not connected");
+    const now = Date.now();
+    if (now - lastSubscribeWarnAt >= 30000) {
+      lastSubscribeWarnAt = now;
+      console.warn("[WS] Cannot subscribe — not connected (retrying)");
+    }
     return;
   }
 
@@ -152,6 +205,8 @@ export function subscribeToInstruments(instruments) {
 }
 
 export function disconnectPriceFeed() {
+  intentionalDisconnect = true;
+
   if (reconnectTimeout) {
     clearTimeout(reconnectTimeout);
     reconnectTimeout = null;
@@ -168,8 +223,12 @@ let pollTimer = null;
 
 // Polls REST LTP for live prices. `callback` receives {label, price} entries.
 // Used as a reliable fallback/normalizer alongside the WebSocket feed.
+let lastPollErrorLoggedAt = 0;
+const POLL_ERROR_THROTTLE_MS = 30000;
+
 export function startRESTPolling(callback, intervalMs = 5000) {
   stopRESTPolling();
+  lastPollErrorLoggedAt = 0;
   const run = async () => {
     try {
       const codes = [INSTRUMENTS_REST.NIFTY, INSTRUMENTS_REST.SENSEX];
@@ -187,8 +246,13 @@ export function startRESTPolling(callback, intervalMs = 5000) {
         };
         callback(result);
       }
+      lastPollErrorLoggedAt = 0;
     } catch (err) {
-      console.error("[Poll] LTP poll failed:", err.message);
+      const now = Date.now();
+      if (now - lastPollErrorLoggedAt >= POLL_ERROR_THROTTLE_MS) {
+        lastPollErrorLoggedAt = now;
+        console.warn("[Poll] LTP poll failed:", err.message, "(retrying silently)");
+      }
     }
   };
   run();

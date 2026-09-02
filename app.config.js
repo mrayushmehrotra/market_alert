@@ -23,6 +23,12 @@ function loadEnv() {
 
 const env = loadEnv();
 
+const NOTIFY_SOUND = "./assets/sounds/notify.mp3";
+const NOTIFY_SOUND_ABS = path.resolve(__dirname, "assets/sounds/notify.mp3");
+const hasNotifySound = fs.existsSync(NOTIFY_SOUND_ABS);
+// Android references res/raw by filename without extension (notify.mp3 → "notify").
+const CROSS_ALERT_SOUND = hasNotifySound ? "notify" : "default";
+
 module.exports = {
   expo: {
     name: "Nifty Sensex Cross Alert",
@@ -54,12 +60,17 @@ module.exports = {
         "expo-notifications",
         {
           icon: "./assets/notification-icon.png",
-          sounds: ["./assets/sounds/cross_alert.wav"],
+          sounds: ["./assets/sounds/notify.mp3"],
         },
       ],
     ],
     extra: {
       INDMONEY_API_KEY: env.INDMONEY_API_KEY || "",
+      CROSS_ALERT_SOUND,
+      hasNotifySound,
+      eas: {
+        projectId: "a8648987-e813-42bd-ba75-f0317fde88c3",
+      },
     },
   },
 };

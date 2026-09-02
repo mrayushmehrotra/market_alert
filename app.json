@@ -29,9 +29,14 @@
         "expo-notifications",
         {
           "icon": "./assets/notification-icon.png",
-          "sounds": ["./assets/sounds/cross_alert.wav"]
+          "sounds": ["./assets/sounds/notify.mp3"]
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "a8648987-e813-42bd-ba75-f0317fde88c3"
+      }
+    }
   }
 }
