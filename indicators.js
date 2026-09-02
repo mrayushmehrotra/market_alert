@@ -2,14 +2,33 @@ import { EMA_PERIOD } from "./config";
 
 // ---------- VWAP ----------
 
+function getISTDayString(tsSeconds) {
+  if (!tsSeconds) return "";
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const d = new Date(tsSeconds * 1000 + IST_OFFSET_MS);
+  return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
+}
+
 export function computeVWAPFromCandles(candles) {
+  if (!candles || candles.length === 0) {
+    return { vwap: 0, cumVolume: 0, cumTypicalVolume: 0 };
+  }
+
+  // VWAP is an intraday indicator that resets every trading session.
+  // Filter candles to only include the latest trading day in the dataset.
+  const lastTs = candles[candles.length - 1].ts;
+  const lastDay = getISTDayString(lastTs);
+  const dayCandles = candles.filter((c) => getISTDayString(c.ts) === lastDay);
+
   let cumTypicalVolume = 0;
   let cumVolume = 0;
 
-  for (const c of candles) {
+  for (const c of dayCandles) {
     const typicalPrice = (c.h + c.l + c.c) / 3;
-    cumTypicalVolume += typicalPrice * c.v;
-    cumVolume += c.v;
+    // For indices (NIFTY/SENSEX), volume is often 0 or unweighted; fallback to 1 so price is weighted across candles.
+    const vol = c.v > 0 ? c.v : 1;
+    cumTypicalVolume += typicalPrice * vol;
+    cumVolume += vol;
   }
 
   const vwap = cumVolume > 0 ? cumTypicalVolume / cumVolume : 0;
@@ -18,8 +37,9 @@ export function computeVWAPFromCandles(candles) {
 
 export function updateVWAP(cumTypicalVolume, cumVolume, candle) {
   const typicalPrice = (candle.h + candle.l + candle.c) / 3;
-  const newCumTV = cumTypicalVolume + typicalPrice * candle.v;
-  const newCumVol = cumVolume + candle.v;
+  const vol = candle.v > 0 ? candle.v : 1;
+  const newCumTV = cumTypicalVolume + typicalPrice * vol;
+  const newCumVol = cumVolume + vol;
   const vwap = newCumVol > 0 ? newCumTV / newCumVol : 0;
   return { vwap, cumVolume: newCumVol, cumTypicalVolume: newCumTV };
 }
