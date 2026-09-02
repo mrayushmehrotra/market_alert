@@ -35,5 +35,6 @@ export const INSTRUMENTS = {
 export const EMA_PERIOD = 9;
 export const CANDLE_INTERVAL_INDSTOCKS = "5minute";
 export const CANDLE_INTERVAL_COINDCX = "5m";
+export const CANDLE_INTERVAL = "5minute";
 
 

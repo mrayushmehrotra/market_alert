@@ -2,7 +2,7 @@ import {
   API_TOKEN,
   INDSTOCKS_BASE_URL,
   INDSTOCKS_WS_URL,
-  CANDLE_INTERVAL,
+  CANDLE_INTERVAL_INDSTOCKS,
   INSTRUMENTS,
 } from "./config";
 
@@ -14,7 +14,7 @@ const INSTRUMENTS_REST = {
 // ---------- REST ----------
 
 export async function fetchHistoricalCandles(scripCode, startTimeMs, endTimeMs) {
-  const url = `${INDSTOCKS_BASE_URL}/market/historical/${CANDLE_INTERVAL}?scrip-codes=${scripCode}&start_time=${startTimeMs}&end_time=${endTimeMs}`;
+  const url = `${INDSTOCKS_BASE_URL}/market/historical/${CANDLE_INTERVAL_INDSTOCKS}?scrip-codes=${scripCode}&start_time=${startTimeMs}&end_time=${endTimeMs}`;
 
   const res = await fetch(url, {
     headers: { Authorization: API_TOKEN },
