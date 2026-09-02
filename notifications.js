@@ -170,7 +170,7 @@ export async function showOrUpdateTickerNotification(data) {
         channelId: "ticker",
         asForegroundService: true,
         ongoing: true,
-        smallIcon: "ic_notification",
+        smallIcon: "ic_launcher",
         color: "#1DB954",
         onlyAlertOnce: true,
       },
