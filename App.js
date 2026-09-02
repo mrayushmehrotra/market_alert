@@ -19,24 +19,22 @@ import {
 
 function formatNum(n) {
   if (!n || n === 0) return "--";
-  return n.toLocaleString("en-IN", { maximumFractionDigits: 1 });
+  return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
 function formatVol(v) {
   if (!v) return "--";
-  if (v >= 1e7) return (v / 1e7).toFixed(1) + "Cr";
-  if (v >= 1e5) return (v / 1e5).toFixed(1) + "L";
+  if (v >= 1e6) return (v / 1e6).toFixed(2) + "M";
   if (v >= 1e3) return (v / 1e3).toFixed(1) + "K";
-  return v.toString();
+  return v.toFixed(2);
 }
 
-function IndexCard({ label, data }) {
+function MarketCard({ label, data }) {
+  if (!data) return null;
   const isUp = data.direction === "above";
   const changeColor = isUp ? "#00c853" : "#ff1744";
-  const arrow = isUp ? "^" : "v";
-
-  const dayChange =
-    data.open > 0 ? (((data.price - data.open) / data.open) * 100).toFixed(2) : "0.00";
+  const arrow = isUp ? "▲" : "▼";
+  const changeVal = data.change || 0;
 
   return (
     <View style={styles.card}>
@@ -46,27 +44,27 @@ function IndexCard({ label, data }) {
       </View>
 
       <Text style={[styles.cardPrice, { color: changeColor }]}>
-        {formatNum(data.price)}
+        ${formatNum(data.price)}
       </Text>
-      <Text style={[styles.cardChange, { color: changeColor }]}>
-        {dayChange > 0 ? "+" : ""}
-        {dayChange}%
+      <Text style={[styles.cardChange, { color: changeVal >= 0 ? "#00c853" : "#ff1744" }]}>
+        {changeVal >= 0 ? "+" : ""}
+        {changeVal.toFixed(2)}% (24h)
       </Text>
 
       <View style={styles.divider} />
 
       <View style={styles.indicatorRow}>
         <Text style={styles.indicatorLabel}>VWAP</Text>
-        <Text style={styles.indicatorValue}>{formatNum(data.vwap)}</Text>
+        <Text style={styles.indicatorValue}>${formatNum(data.vwap)}</Text>
       </View>
 
       <View style={styles.indicatorRow}>
         <Text style={styles.indicatorLabel}>EMA9</Text>
-        <Text style={styles.indicatorValue}>{formatNum(data.ema9)}</Text>
+        <Text style={styles.indicatorValue}>${formatNum(data.ema9)}</Text>
       </View>
 
       <View style={styles.indicatorRow}>
-        <Text style={styles.indicatorLabel}>Vol</Text>
+        <Text style={styles.indicatorLabel}>24h Vol</Text>
         <Text style={styles.indicatorValue}>{formatVol(data.volume)}</Text>
       </View>
 
@@ -100,23 +98,13 @@ export default function App() {
   const [status, setStatus] = useState("Not started");
   const [running, setRunning] = useState(false);
   const initialData = getData();
-  const [nifty, setNifty] = useState(initialData.NIFTY);
-  const [sensex, setSensex] = useState(initialData.SENSEX);
+  const [sol, setSol] = useState(initialData.SOL);
   const [session, setSession] = useState(initialData.session);
   const [lastCross, setLastCross] = useState(null);
-  const [hasApiKey, setHasApiKey] = useState(true);
-
-  useEffect(() => {
-    if (!API_TOKEN) {
-      setHasApiKey(false);
-      setStatus("Missing INDMONEY_API_KEY in .env");
-    }
-  }, []);
 
   useEffect(() => {
     onData((d) => {
-      setNifty(d.NIFTY);
-      setSensex(d.SENSEX);
+      setSol(d.SOL);
       setSession(d.session);
       if (d.session) {
         setRunning(d.session.running);
@@ -143,25 +131,15 @@ export default function App() {
     setRunning(false);
     setStatus("Stopped");
     const current = getData();
-    setNifty(current.NIFTY);
-    setSensex(current.SENSEX);
+    setSol(current.SOL);
     setSession(current.session);
   }
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.title}>NIFTY / SENSEX Screener</Text>
-        <Text style={styles.subtitle}>VWAP + EMA9 Cross Detector</Text>
-
-        {!hasApiKey && (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>
-              Set INDMONEY_API_KEY in your .env file{"\n"}
-              (INDstocks access token from indstocks.com)
-            </Text>
-          </View>
-        )}
+        <Text style={styles.title}>SOL / USDT Screener</Text>
+        <Text style={styles.subtitle}>CoinDCX VWAP + EMA9 Cross Alert</Text>
 
         {running && session && (
           <View style={styles.sessionBar}>
@@ -177,8 +155,7 @@ export default function App() {
         )}
 
         <View style={styles.cardsRow}>
-          <IndexCard label="NIFTY 50" data={nifty} />
-          <IndexCard label="SENSEX" data={sensex} />
+          <MarketCard label="SOL / USDT" data={sol} />
         </View>
 
         {lastCross && (
@@ -194,8 +171,8 @@ export default function App() {
               {lastCross.cross === "bullish" ? "ABOVE" : "below"} VWAP
             </Text>
             <Text style={styles.crossAlertDetails}>
-              Price {formatNum(lastCross.price)} | VWAP {formatNum(lastCross.vwap)} | EMA9{" "}
-              {formatNum(lastCross.ema)}
+              Price ${formatNum(lastCross.price)} | VWAP ${formatNum(lastCross.vwap)} | EMA9{" "}
+              ${formatNum(lastCross.ema)}
             </Text>
             <Text style={styles.crossAlertTime}>{lastCross.time}</Text>
           </View>
@@ -205,7 +182,6 @@ export default function App() {
           <TouchableOpacity
             style={[styles.button, styles.startButton]}
             onPress={handleStart}
-            disabled={!hasApiKey}
           >
             <Text style={styles.buttonText}>Start 6-Hour Monitoring</Text>
           </TouchableOpacity>
@@ -221,7 +197,7 @@ export default function App() {
         <Text style={styles.status}>{status}</Text>
 
         <Text style={styles.hint}>
-          Tracks NIFTY 50 and SENSEX in real-time using INDstocks WebSocket for 6 hours.
+          Tracks SOL/USDT in real-time using CoinDCX API for 6 hours.
           Computes VWAP and EMA9 on 5-minute candles. Plays instant sound alerts when EMA9 crosses
           VWAP and tracks total crossover count in the persistent top notification panel.
         </Text>

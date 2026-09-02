@@ -128,24 +128,20 @@ function formatTickerTitle(data) {
 }
 
 function formatTickerBody(data) {
-  const fmt = (d) => {
-    if (!d || !d.price) return "--";
-    const arrow = d.direction === "above" ? "▲" : "▼";
-    return `${formatNumber(d.price)} ${arrow}`;
-  };
-
-  return `NIFTY: ${fmt(data.NIFTY)}  |  SENSEX: ${fmt(data.SENSEX)}`;
+  const sol = data.SOL;
+  if (sol && sol.price) {
+    const arrow = sol.direction === "above" ? "▲" : "▼";
+    return `SOL/USDT: $${formatNumber(sol.price)} ${arrow}`;
+  }
+  return `Monitoring SOL/USDT`;
 }
 
 function formatTickerSubText(data) {
-  const parts = [];
-  if (data.NIFTY?.vwap) {
-    parts.push(`N: VWAP ${formatNumber(data.NIFTY.vwap)} EMA ${formatNumber(data.NIFTY.ema9)}`);
+  const sol = data.SOL;
+  if (sol && sol.vwap) {
+    return `VWAP: $${formatNumber(sol.vwap)}  |  EMA9: $${formatNumber(sol.ema9)}`;
   }
-  if (data.SENSEX?.vwap) {
-    parts.push(`S: VWAP ${formatNumber(data.SENSEX.vwap)} EMA ${formatNumber(data.SENSEX.ema9)}`);
-  }
-  return parts.join("  |  ");
+  return "";
 }
 
 export async function showOrUpdateTickerNotification(data) {

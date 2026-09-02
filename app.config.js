@@ -66,6 +66,11 @@ module.exports = {
     ],
     extra: {
       INDMONEY_API_KEY: env.INDMONEY_API_KEY || "",
+      COINDCX_API_KEY:
+        env.COINDCX_API_KEY || "7ef2426cec6f7220178d00e593f8bb29767dbb2c2c",
+      COINDCX_API_SECRET:
+        env.COINDCX_API_SECRET ||
+        "eaa11768d325279066b288c75095890e3af13a4ec0241f51e0276df0e61",
       CROSS_ALERT_SOUND,
       hasNotifySound,
       eas: {
