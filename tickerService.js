@@ -108,12 +108,22 @@ async function bootstrapIndstocks(label) {
   if (!inst || !inst.restScrip) return;
 
   const nowMs = Date.now();
-  const todayOpenMs = getTodayMarketOpenMs();
-  const startMs = Math.min(todayOpenMs, nowMs - 24 * 60 * 60 * 1000);
+  // Request candles for the past 3 days so data is always loaded even after market hours / weekends
+  const startMs = nowMs - 3 * 24 * 60 * 60 * 1000;
 
   try {
-    const candles = await fetchIndstocksCandles(inst.restScrip, startMs, nowMs);
-    if (!candles || candles.length === 0) return;
+    let candles = await fetchIndstocksCandles(inst.restScrip, startMs, nowMs);
+
+    if (!candles || candles.length === 0) {
+      // Fallback to 7 days if today is a weekend / market holiday
+      const fallbackStart = nowMs - 7 * 24 * 60 * 60 * 1000;
+      candles = await fetchIndstocksCandles(inst.restScrip, fallbackStart, nowMs);
+    }
+
+    if (!candles || candles.length === 0) {
+      console.log(`[Ticker] No historical candles for ${label}`);
+      return;
+    }
 
     candles.sort((a, b) => a.ts - b.ts);
 

@@ -66,8 +66,8 @@ function parseCandles(raw) {
 // ---------- Live Ticker (LTP & 24h Stats) ----------
 
 export async function fetchLTP(market = INSTRUMENTS.SOL.market) {
-  // GET https://api.coindcx.com/exchange/v1/ticker
-  const url = `${COINDCX_REST_URL}/exchange/v1/ticker`;
+  // GET https://api.coindcx.com/exchange/ticker
+  const url = `${COINDCX_REST_URL}/exchange/ticker`;
 
   const res = await fetch(url);
   if (!res.ok) {
