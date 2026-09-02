@@ -1,8 +1,16 @@
-import { INSTRUMENTS, EMA_PERIOD } from "./config";
+import { INSTRUMENTS, EMA_PERIOD, CANDLE_INTERVAL_INDSTOCKS, CANDLE_INTERVAL_COINDCX } from "./config";
 import {
-  fetchHistoricalCandles,
-  startRESTPolling,
-  stopRESTPolling,
+  fetchHistoricalCandles as fetchIndstocksCandles,
+  connectPriceFeed,
+  subscribeToInstruments,
+  disconnectPriceFeed,
+  startRESTPolling as startIndstocksPolling,
+  stopRESTPolling as stopIndstocksPolling,
+} from "./indstocksClient";
+import {
+  fetchHistoricalCandles as fetchCoindcxCandles,
+  startRESTPolling as startCoindcxPolling,
+  stopRESTPolling as stopCoindcxPolling,
 } from "./coindcxClient";
 import {
   computeVWAPFromCandles,
@@ -28,22 +36,18 @@ let sessionTimer = null;
 let sessionRunning = false;
 
 const state = {
+  NIFTY: createIndicatorState(),
+  SENSEX: createIndicatorState(),
   SOL: createIndicatorState(),
 };
 
 const latestPrices = {
-  SOL: {
-    price: 0,
-    open: 0,
-    high: 0,
-    low: 0,
-    volume: 0,
-    change: 0,
-    direction: "above",
-  },
+  NIFTY: { price: 0, open: 0, high: 0, low: 0, volume: 0, change: 0, direction: "above" },
+  SENSEX: { price: 0, open: 0, high: 0, low: 0, volume: 0, change: 0, direction: "above" },
+  SOL: { price: 0, open: 0, high: 0, low: 0, volume: 0, change: 0, direction: "above" },
 };
 
-let lastCandleTs = 0;
+let lastCandleTs = { NIFTY: 0, SENSEX: 0, SOL: 0 };
 let onDataCallback = null;
 let onCrossCallback = null;
 let onStatusCallback = null;
@@ -84,38 +88,82 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
-// ---------- Bootstrap indicators from historical 5m candles ----------
+function getISTNow() {
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  return new Date(Date.now() + IST_OFFSET_MS);
+}
 
-async function bootstrapIndicators() {
+function getTodayMarketOpenMs() {
+  const ist = getISTNow();
+  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+  const openIST = new Date(ist);
+  openIST.setUTCHours(9, 15, 0, 0);
+  return openIST.getTime() - IST_OFFSET_MS;
+}
+
+// ---------- Bootstrap indicators ----------
+
+async function bootstrapIndstocks(label) {
+  const inst = INSTRUMENTS[label];
+  if (!inst || !inst.restScrip) return;
+
+  const nowMs = Date.now();
+  const todayOpenMs = getTodayMarketOpenMs();
+  const startMs = Math.min(todayOpenMs, nowMs - 24 * 60 * 60 * 1000);
+
+  try {
+    const candles = await fetchIndstocksCandles(inst.restScrip, startMs, nowMs);
+    if (!candles || candles.length === 0) return;
+
+    candles.sort((a, b) => a.ts - b.ts);
+
+    const vwapResult = computeVWAPFromCandles(candles);
+    state[label].vwap = vwapResult.vwap;
+    state[label].cumVolume = vwapResult.cumVolume;
+    state[label].cumTypicalVolume = vwapResult.cumTypicalVolume;
+
+    const closes = candles.map((c) => c.c);
+    state[label].ema9 = computeEMA9FromCloses(closes, EMA_PERIOD);
+    state[label].lastClose = closes[closes.length - 1] || 0;
+
+    lastCandleTs[label] = candles[candles.length - 1].ts;
+
+    const last = candles[candles.length - 1];
+    latestPrices[label] = {
+      price: last.c,
+      open: last.o,
+      high: last.h,
+      low: last.l,
+      volume: last.v,
+      change: last.o > 0 ? ((last.c - last.o) / last.o) * 100 : 0,
+      direction: last.c >= state[label].vwap ? "above" : "below",
+    };
+  } catch (err) {
+    console.error(`[Ticker] Bootstrap error ${label}:`, err.message);
+  }
+}
+
+async function bootstrapCoindcx() {
   const inst = INSTRUMENTS.SOL;
   if (!inst) return;
 
   try {
-    const candles = await fetchHistoricalCandles(inst.pair, "5m", 500);
+    const candles = await fetchCoindcxCandles(inst.pair, CANDLE_INTERVAL_COINDCX, 500);
+    if (!candles || candles.length === 0) return;
 
-    if (!candles || candles.length === 0) {
-      console.log(`[Ticker] No historical candles for ${inst.label}`);
-      return;
-    }
-
-    // Sort by timestamp ascending
     candles.sort((a, b) => a.ts - b.ts);
 
-    // Compute VWAP from all candles
     const vwapResult = computeVWAPFromCandles(candles);
     state.SOL.vwap = vwapResult.vwap;
     state.SOL.cumVolume = vwapResult.cumVolume;
     state.SOL.cumTypicalVolume = vwapResult.cumTypicalVolume;
 
-    // Compute EMA9 from close prices
     const closes = candles.map((c) => c.c);
     state.SOL.ema9 = computeEMA9FromCloses(closes, EMA_PERIOD);
     state.SOL.lastClose = closes[closes.length - 1] || 0;
 
-    // Record last candle timestamp
-    lastCandleTs = candles[candles.length - 1].ts;
+    lastCandleTs.SOL = candles[candles.length - 1].ts;
 
-    // Set latest price from last candle
     const last = candles[candles.length - 1];
     latestPrices.SOL = {
       price: last.c,
@@ -126,64 +174,89 @@ async function bootstrapIndicators() {
       change: 0,
       direction: last.c >= state.SOL.vwap ? "above" : "below",
     };
-
-    console.log(
-      `[Ticker] ${inst.label} bootstrapped: VWAP=${round2(state.SOL.vwap)} EMA9=${round2(state.SOL.ema9)} candles=${candles.length}`
-    );
   } catch (err) {
-    console.error(`[Ticker] Failed to bootstrap ${inst.label}:`, err.message);
+    console.error(`[Ticker] Bootstrap error SOL:`, err.message);
   }
 }
 
-// ---------- Handle live price tick from CoinDCX ----------
+// ---------- Real-time tick handlers ----------
 
-function handleLiveTick(data) {
+function handleIndstocksQuote(msg) {
+  const { instrument, data } = msg;
+  let label = null;
+  for (const [key, inst] of Object.entries(INSTRUMENTS)) {
+    if (inst.wsInstrument && (inst.wsInstrument.includes(instrument) || instrument === inst.wsInstrument)) {
+      label = key;
+      break;
+    }
+  }
+  if (!label) return;
+
+  const price = data.ltp || data.close || latestPrices[label].price;
+  if (!price) return;
+
+  processPriceUpdate(label, price, data.high, data.low, data.volume, data.open);
+}
+
+function handleIndstocksRESTPoll({ NIFTY: nPrice, SENSEX: sPrice }) {
+  if (nPrice) processPriceUpdate("NIFTY", nPrice);
+  if (sPrice) processPriceUpdate("SENSEX", sPrice);
+}
+
+function handleCoindcxTick(data) {
   if (!data || !data.price) return;
+  processPriceUpdate("SOL", data.price, data.high, data.low, data.volume, null, data.change);
+}
 
-  const price = data.price;
-  const prevEMA = state.SOL.ema9;
-  const prevVWAP = state.SOL.vwap;
+function processPriceUpdate(label, price, high, low, volume, open, changeVal) {
+  const prevEMA = state[label].ema9;
+  const prevVWAP = state[label].vwap;
 
-  if (price !== latestPrices.SOL.price) {
-    latestPrices.SOL.price = price;
-    latestPrices.SOL.high = data.high || latestPrices.SOL.high || price;
-    latestPrices.SOL.low = data.low || latestPrices.SOL.low || price;
-    latestPrices.SOL.volume = data.volume || latestPrices.SOL.volume;
-    latestPrices.SOL.change = data.change || latestPrices.SOL.change;
-    latestPrices.SOL.direction = price >= prevVWAP ? "above" : "below";
+  if (price !== latestPrices[label].price) {
+    latestPrices[label].price = price;
+    if (open) latestPrices[label].open = open;
+    if (high) latestPrices[label].high = high;
+    if (low) latestPrices[label].low = low;
+    if (volume) latestPrices[label].volume = volume;
+    if (changeVal !== undefined && changeVal !== null) {
+      latestPrices[label].change = changeVal;
+    } else if (latestPrices[label].open > 0) {
+      latestPrices[label].change = ((price - latestPrices[label].open) / latestPrices[label].open) * 100;
+    }
+    latestPrices[label].direction = price >= prevVWAP ? "above" : "below";
 
     // Update EMA9
     if (prevEMA > 0) {
-      state.SOL.ema9 = updateEMA9(prevEMA, price, EMA_PERIOD);
-      state.SOL.lastClose = price;
+      state[label].ema9 = updateEMA9(prevEMA, price, EMA_PERIOD);
+      state[label].lastClose = price;
     } else {
-      state.SOL.ema9 = price;
+      state[label].ema9 = price;
     }
 
-    // Update VWAP with tick
+    // Update VWAP
     const currentCandle = {
-      h: latestPrices.SOL.high,
-      l: latestPrices.SOL.low,
+      h: latestPrices[label].high || price,
+      l: latestPrices[label].low || price,
       c: price,
-      v: latestPrices.SOL.volume || 100,
+      v: latestPrices[label].volume || 100,
     };
     const vwapResult = updateVWAP(
-      state.SOL.cumTypicalVolume,
-      state.SOL.cumVolume,
+      state[label].cumTypicalVolume,
+      state[label].cumVolume,
       currentCandle
     );
-    state.SOL.vwap = vwapResult.vwap;
+    state[label].vwap = vwapResult.vwap;
 
-    // Detect crossover
-    const cross = detectCross(prevEMA, prevVWAP, state.SOL.ema9, state.SOL.vwap);
+    // Detect Crossover
+    const cross = detectCross(prevEMA, prevVWAP, state[label].ema9, state[label].vwap);
     if (cross) {
       crossCount++;
       const crossPayload = {
-        label: INSTRUMENTS.SOL.label,
+        label: INSTRUMENTS[label]?.label || label,
         cross,
         price,
-        vwap: round2(state.SOL.vwap),
-        ema: round2(state.SOL.ema9),
+        vwap: round2(state[label].vwap),
+        ema: round2(state[label].ema9),
       };
       if (onCrossCallback) onCrossCallback(crossPayload);
       showCrossAlert(crossPayload);
@@ -198,6 +271,28 @@ function handleLiveTick(data) {
 
 export function getData() {
   return {
+    NIFTY: {
+      price: latestPrices.NIFTY.price,
+      open: latestPrices.NIFTY.open,
+      high: latestPrices.NIFTY.high,
+      low: latestPrices.NIFTY.low,
+      volume: latestPrices.NIFTY.volume,
+      change: latestPrices.NIFTY.change,
+      direction: latestPrices.NIFTY.direction,
+      vwap: round2(state.NIFTY.vwap),
+      ema9: round2(state.NIFTY.ema9),
+    },
+    SENSEX: {
+      price: latestPrices.SENSEX.price,
+      open: latestPrices.SENSEX.open,
+      high: latestPrices.SENSEX.high,
+      low: latestPrices.SENSEX.low,
+      volume: latestPrices.SENSEX.volume,
+      change: latestPrices.SENSEX.change,
+      direction: latestPrices.SENSEX.direction,
+      vwap: round2(state.SENSEX.vwap),
+      ema9: round2(state.SENSEX.ema9),
+    },
     SOL: {
       price: latestPrices.SOL.price,
       open: latestPrices.SOL.open,
@@ -235,14 +330,17 @@ export async function startTicker() {
   sessionRunning = true;
   crossCount = 0;
 
-  // Bootstrap from historical data
-  if (onStatusCallback) onStatusCallback("Fetching SOL/USDT historical data...");
-  await bootstrapIndicators();
+  // Bootstrap historical indicators for all 3 assets in parallel
+  if (onStatusCallback) onStatusCallback("Fetching historical data for NIFTY, SENSEX & SOL...");
+  await Promise.all([
+    bootstrapIndstocks("NIFTY"),
+    bootstrapIndstocks("SENSEX"),
+    bootstrapCoindcx(),
+  ]);
 
-  // Show initial notification
   showOrUpdateTickerNotification(getData());
 
-  // Start 1-second session timer loop for countdown updates & auto-stop
+  // Start 1-second countdown session timer loop
   if (sessionTimer) clearInterval(sessionTimer);
   sessionTimer = setInterval(() => {
     if (!sessionRunning) return;
@@ -256,11 +354,26 @@ export async function startTicker() {
     if (onDataCallback) onDataCallback(getData());
   }, 1000);
 
-  // Poll CoinDCX live ticker
-  if (onStatusCallback) onStatusCallback("Connected — SOL/USDT 6h monitoring active");
-  startRESTPolling(handleLiveTick, 3000);
+  // Connect live price feeds
+  if (onStatusCallback) onStatusCallback("Connecting to live market feeds...");
 
-  // Notify UI with initial data
+  // 1. INDstocks WebSocket & REST polling for NIFTY & SENSEX
+  const indInstruments = [INSTRUMENTS.NIFTY.wsInstrument, INSTRUMENTS.SENSEX.wsInstrument];
+  connectPriceFeed(
+    handleIndstocksQuote,
+    () => {
+      subscribeToInstruments(indInstruments);
+    },
+    () => {
+      console.log("[INDstocks] WS disconnected, falling back to REST");
+    }
+  );
+  startIndstocksPolling(handleIndstocksRESTPoll, 5000);
+
+  // 2. CoinDCX REST polling for SOL/USDT
+  startCoindcxPolling(handleCoindcxTick, 3000);
+
+  if (onStatusCallback) onStatusCallback("Connected — 6h multi-asset monitoring active");
   if (onDataCallback) onDataCallback(getData());
 }
 
@@ -272,19 +385,23 @@ export async function stopTicker() {
   sessionRunning = false;
   sessionStartTime = null;
 
-  stopRESTPolling();
+  disconnectPriceFeed();
+  stopIndstocksPolling();
+  stopCoindcxPolling();
   await cancelTickerNotification();
 
   // Reset state
-  state.SOL = createIndicatorState();
-  latestPrices.SOL = {
-    price: 0,
-    open: 0,
-    high: 0,
-    low: 0,
-    volume: 0,
-    change: 0,
-    direction: "above",
-  };
-  lastCandleTs = 0;
+  for (const label of Object.keys(state)) {
+    state[label] = createIndicatorState();
+    latestPrices[label] = {
+      price: 0,
+      open: 0,
+      high: 0,
+      low: 0,
+      volume: 0,
+      change: 0,
+      direction: "above",
+    };
+    lastCandleTs[label] = 0;
+  }
 }

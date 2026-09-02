@@ -128,20 +128,34 @@ function formatTickerTitle(data) {
 }
 
 function formatTickerBody(data) {
-  const sol = data.SOL;
-  if (sol && sol.price) {
-    const arrow = sol.direction === "above" ? "▲" : "▼";
-    return `SOL/USDT: $${formatNumber(sol.price)} ${arrow}`;
+  const parts = [];
+  if (data.NIFTY?.price) {
+    const arr = data.NIFTY.direction === "above" ? "▲" : "▼";
+    parts.push(`NIFTY: ${formatNumber(data.NIFTY.price)}${arr}`);
   }
-  return `Monitoring SOL/USDT`;
+  if (data.SENSEX?.price) {
+    const arr = data.SENSEX.direction === "above" ? "▲" : "▼";
+    parts.push(`SENSEX: ${formatNumber(data.SENSEX.price)}${arr}`);
+  }
+  if (data.SOL?.price) {
+    const arr = data.SOL.direction === "above" ? "▲" : "▼";
+    parts.push(`SOL: $${formatNumber(data.SOL.price)}${arr}`);
+  }
+  return parts.length > 0 ? parts.join(" | ") : "Monitoring Active";
 }
 
 function formatTickerSubText(data) {
-  const sol = data.SOL;
-  if (sol && sol.vwap) {
-    return `VWAP: $${formatNumber(sol.vwap)}  |  EMA9: $${formatNumber(sol.ema9)}`;
+  const parts = [];
+  if (data.NIFTY?.vwap) {
+    parts.push(`N: V${formatNumber(data.NIFTY.vwap)} E${formatNumber(data.NIFTY.ema9)}`);
   }
-  return "";
+  if (data.SENSEX?.vwap) {
+    parts.push(`S: V${formatNumber(data.SENSEX.vwap)} E${formatNumber(data.SENSEX.ema9)}`);
+  }
+  if (data.SOL?.vwap) {
+    parts.push(`SOL: V$${formatNumber(data.SOL.vwap)} E$${formatNumber(data.SOL.ema9)}`);
+  }
+  return parts.join(" | ");
 }
 
 export async function showOrUpdateTickerNotification(data) {

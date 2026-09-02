@@ -17,24 +17,27 @@ import {
   onStatus,
 } from "./tickerService";
 
-function formatNum(n) {
+function formatNum(n, isCurrency = false) {
   if (!n || n === 0) return "--";
-  return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  return n.toLocaleString("en-US", { maximumFractionDigits: isCurrency ? 2 : 1 });
 }
 
 function formatVol(v) {
   if (!v) return "--";
+  if (v >= 1e7) return (v / 1e7).toFixed(1) + "Cr";
   if (v >= 1e6) return (v / 1e6).toFixed(2) + "M";
+  if (v >= 1e5) return (v / 1e5).toFixed(1) + "L";
   if (v >= 1e3) return (v / 1e3).toFixed(1) + "K";
   return v.toFixed(2);
 }
 
-function MarketCard({ label, data }) {
+function MarketCard({ label, data, isCrypto = false }) {
   if (!data) return null;
   const isUp = data.direction === "above";
   const changeColor = isUp ? "#00c853" : "#ff1744";
   const arrow = isUp ? "▲" : "▼";
   const changeVal = data.change || 0;
+  const prefix = isCrypto ? "$" : "";
 
   return (
     <View style={styles.card}>
@@ -44,27 +47,27 @@ function MarketCard({ label, data }) {
       </View>
 
       <Text style={[styles.cardPrice, { color: changeColor }]}>
-        ${formatNum(data.price)}
+        {prefix}{formatNum(data.price, isCrypto)}
       </Text>
       <Text style={[styles.cardChange, { color: changeVal >= 0 ? "#00c853" : "#ff1744" }]}>
         {changeVal >= 0 ? "+" : ""}
-        {changeVal.toFixed(2)}% (24h)
+        {changeVal.toFixed(2)}%
       </Text>
 
       <View style={styles.divider} />
 
       <View style={styles.indicatorRow}>
         <Text style={styles.indicatorLabel}>VWAP</Text>
-        <Text style={styles.indicatorValue}>${formatNum(data.vwap)}</Text>
+        <Text style={styles.indicatorValue}>{prefix}{formatNum(data.vwap, isCrypto)}</Text>
       </View>
 
       <View style={styles.indicatorRow}>
         <Text style={styles.indicatorLabel}>EMA9</Text>
-        <Text style={styles.indicatorValue}>${formatNum(data.ema9)}</Text>
+        <Text style={styles.indicatorValue}>{prefix}{formatNum(data.ema9, isCrypto)}</Text>
       </View>
 
       <View style={styles.indicatorRow}>
-        <Text style={styles.indicatorLabel}>24h Vol</Text>
+        <Text style={styles.indicatorLabel}>Vol</Text>
         <Text style={styles.indicatorValue}>{formatVol(data.volume)}</Text>
       </View>
 
@@ -98,12 +101,16 @@ export default function App() {
   const [status, setStatus] = useState("Not started");
   const [running, setRunning] = useState(false);
   const initialData = getData();
+  const [nifty, setNifty] = useState(initialData.NIFTY);
+  const [sensex, setSensex] = useState(initialData.SENSEX);
   const [sol, setSol] = useState(initialData.SOL);
   const [session, setSession] = useState(initialData.session);
   const [lastCross, setLastCross] = useState(null);
 
   useEffect(() => {
     onData((d) => {
+      setNifty(d.NIFTY);
+      setSensex(d.SENSEX);
       setSol(d.SOL);
       setSession(d.session);
       if (d.session) {
@@ -131,6 +138,8 @@ export default function App() {
     setRunning(false);
     setStatus("Stopped");
     const current = getData();
+    setNifty(current.NIFTY);
+    setSensex(current.SENSEX);
     setSol(current.SOL);
     setSession(current.session);
   }
@@ -138,8 +147,8 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.title}>SOL / USDT Screener</Text>
-        <Text style={styles.subtitle}>CoinDCX VWAP + EMA9 Cross Alert</Text>
+        <Text style={styles.title}>Multi-Asset Screener</Text>
+        <Text style={styles.subtitle}>NIFTY • SENSEX • SOL/USDT Crossover Alert</Text>
 
         {running && session && (
           <View style={styles.sessionBar}>
@@ -155,7 +164,12 @@ export default function App() {
         )}
 
         <View style={styles.cardsRow}>
-          <MarketCard label="SOL / USDT" data={sol} />
+          <MarketCard label="NIFTY 50" data={nifty} />
+          <MarketCard label="SENSEX" data={sensex} />
+        </View>
+
+        <View style={styles.singleCardRow}>
+          <MarketCard label="SOL / USDT" data={sol} isCrypto={true} />
         </View>
 
         {lastCross && (
@@ -171,8 +185,7 @@ export default function App() {
               {lastCross.cross === "bullish" ? "ABOVE" : "below"} VWAP
             </Text>
             <Text style={styles.crossAlertDetails}>
-              Price ${formatNum(lastCross.price)} | VWAP ${formatNum(lastCross.vwap)} | EMA9{" "}
-              ${formatNum(lastCross.ema)}
+              Price {lastCross.label.includes("SOL") ? "$" : ""}{formatNum(lastCross.price, lastCross.label.includes("SOL"))} | VWAP {lastCross.label.includes("SOL") ? "$" : ""}{formatNum(lastCross.vwap, lastCross.label.includes("SOL"))} | EMA9 {lastCross.label.includes("SOL") ? "$" : ""}{formatNum(lastCross.ema, lastCross.label.includes("SOL"))}
             </Text>
             <Text style={styles.crossAlertTime}>{lastCross.time}</Text>
           </View>
@@ -197,8 +210,8 @@ export default function App() {
         <Text style={styles.status}>{status}</Text>
 
         <Text style={styles.hint}>
-          Tracks SOL/USDT in real-time using CoinDCX API for 6 hours.
-          Computes VWAP and EMA9 on 5-minute candles. Plays instant sound alerts when EMA9 crosses
+          Tracks NIFTY 50, SENSEX, and SOL/USDT in real-time for 6 hours.
+          Computes VWAP and EMA9 on 5-minute candles. Plays instant sound alerts when any asset's EMA9 crosses
           VWAP and tracks total crossover count in the persistent top notification panel.
         </Text>
       </ScrollView>
@@ -261,6 +274,10 @@ const styles = StyleSheet.create({
   cardsRow: {
     flexDirection: "row",
     gap: 12,
+    width: "100%",
+    marginBottom: 12,
+  },
+  singleCardRow: {
     width: "100%",
     marginBottom: 16,
   },
