@@ -1,0 +1,24 @@
+# dependencies
+node_modules/
+
+# bun
+.bun/
+
+# Expo
+.expo/
+dist/
+web-build/
+
+# native build output
+android/
+ios/
+
+# env (contains your API key — never commit)
+.env
+.env.local
+
+# misc
+.DS_Store
+*.log
+npm-debug.*
+yarn-error.*
