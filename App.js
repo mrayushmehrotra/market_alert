@@ -3,6 +3,7 @@ import {
   View,
   Text,
   TouchableOpacity,
+  TextInput,
   StyleSheet,
   SafeAreaView,
   ScrollView,
@@ -15,6 +16,7 @@ import {
   onData,
   onCross,
   onStatus,
+  updateIndstocksToken,
 } from "./tickerService";
 
 function formatNum(n, isCurrency = false) {
@@ -106,6 +108,8 @@ export default function App() {
   const [sol, setSol] = useState(initialData.SOL);
   const [session, setSession] = useState(initialData.session);
   const [lastCross, setLastCross] = useState(null);
+  const [tokenInput, setTokenInput] = useState("");
+  const [showTokenBox, setShowTokenBox] = useState(false);
 
   useEffect(() => {
     onData((d) => {
@@ -144,11 +148,42 @@ export default function App() {
     setSession(current.session);
   }
 
+  async function handleTokenSave() {
+    if (!tokenInput.trim()) return;
+    await updateIndstocksToken(tokenInput.trim());
+    setShowTokenBox(false);
+    setTokenInput("");
+  }
+
+  const isTokenExpired = status.includes("403") || status.includes("expired");
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.title}>Multi-Asset Screener</Text>
         <Text style={styles.subtitle}>NIFTY • SENSEX • SOL/USDT Crossover Alert</Text>
+
+        {(isTokenExpired || showTokenBox) && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>
+              INDstocks Token Expired or Invalid (HTTP 403){"\n"}
+              Paste a fresh token from indstocks.com below:
+            </Text>
+            <TextInput
+              style={styles.tokenInput}
+              placeholder="Paste INDstocks Access Token"
+              placeholderTextColor="#8b949e"
+              value={tokenInput}
+              onChangeText={setTokenInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              multiline={false}
+            />
+            <TouchableOpacity style={styles.saveTokenButton} onPress={handleTokenSave}>
+              <Text style={styles.saveTokenButtonText}>Update Token & Connect</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {running && session && (
           <View style={styles.sessionBar}>
@@ -206,6 +241,12 @@ export default function App() {
             <Text style={styles.buttonText}>Stop Monitoring</Text>
           </TouchableOpacity>
         )}
+
+        <TouchableOpacity onPress={() => setShowTokenBox(!showTokenBox)}>
+          <Text style={styles.updateTokenLink}>
+            {showTokenBox ? "Hide Token Input" : "🔑 Change / Update INDstocks Token"}
+          </Text>
+        </TouchableOpacity>
 
         <Text style={styles.status}>{status}</Text>
 
@@ -408,6 +449,35 @@ const styles = StyleSheet.create({
   errorText: {
     color: "#f85149",
     fontSize: 13,
+    textAlign: "center",
+    marginBottom: 8,
+  },
+  tokenInput: {
+    backgroundColor: "#0d1117",
+    color: "#e6edf3",
+    borderColor: "#30363d",
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  saveTokenButton: {
+    backgroundColor: "#238636",
+    paddingVertical: 8,
+    borderRadius: 6,
+    alignItems: "center",
+  },
+  saveTokenButtonText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  updateTokenLink: {
+    color: "#58a6ff",
+    fontSize: 12,
+    marginBottom: 12,
     textAlign: "center",
   },
   hint: {

@@ -1,3 +1,4 @@
+import Constants from "expo-constants";
 import {
   API_TOKEN,
   INDSTOCKS_BASE_URL,
@@ -5,6 +6,23 @@ import {
   CANDLE_INTERVAL_INDSTOCKS,
   INSTRUMENTS,
 } from "./config";
+
+let customToken = "";
+
+export function setApiToken(token) {
+  customToken = (token || "").replace(/^["']|["']$/g, "").trim();
+}
+
+export function getApiToken() {
+  if (customToken) return customToken;
+  const raw =
+    process.env.EXPO_PUBLIC_INDMONEY_API_KEY ||
+    Constants.expoConfig?.extra?.INDMONEY_API_KEY ||
+    process.env.INDMONEY_API_KEY ||
+    API_TOKEN ||
+    "";
+  return raw.replace(/^["']|["']$/g, "").trim();
+}
 
 const INSTRUMENTS_REST = {
   NIFTY: INSTRUMENTS.NIFTY.restScrip,
@@ -14,10 +32,11 @@ const INSTRUMENTS_REST = {
 // ---------- REST ----------
 
 export async function fetchHistoricalCandles(scripCode, startTimeMs, endTimeMs) {
+  const token = getApiToken();
   const url = `${INDSTOCKS_BASE_URL}/market/historical/${CANDLE_INTERVAL_INDSTOCKS}?scrip-codes=${scripCode}&start_time=${startTimeMs}&end_time=${endTimeMs}`;
 
   const res = await fetch(url, {
-    headers: { Authorization: API_TOKEN },
+    headers: { Authorization: token },
   });
 
   if (!res.ok) {
@@ -36,11 +55,12 @@ export async function fetchHistoricalCandles(scripCode, startTimeMs, endTimeMs) 
 }
 
 export async function fetchLTP(scripCodes) {
+  const token = getApiToken();
   const codes = scripCodes.join(",");
   const url = `${INDSTOCKS_BASE_URL}/market/quotes/ltp?scrip-codes=${codes}`;
 
   const res = await fetch(url, {
-    headers: { Authorization: API_TOKEN },
+    headers: { Authorization: token },
   });
 
   if (!res.ok) {
@@ -53,10 +73,11 @@ export async function fetchLTP(scripCodes) {
 }
 
 export async function fetchInstruments(source = "index") {
+  const token = getApiToken();
   const url = `${INDSTOCKS_BASE_URL}/market/instruments?source=${source}`;
 
   const res = await fetch(url, {
-    headers: { Authorization: API_TOKEN },
+    headers: { Authorization: token },
   });
 
   if (!res.ok) {
@@ -107,7 +128,8 @@ function parseWsMessage(raw) {
 }
 
 export function connectPriceFeed(onQuote, onConnect, onDisconnect) {
-  if (!API_TOKEN?.trim()) {
+  const token = getApiToken();
+  if (!token) {
     console.warn("[WS] Skipping WebSocket — missing API token (REST polling still active)");
     if (onDisconnect) onDisconnect();
     return null;
@@ -127,7 +149,7 @@ export function connectPriceFeed(onQuote, onConnect, onDisconnect) {
       ws = new WebSocket(INDSTOCKS_WS_URL);
     } else {
       ws = new WebSocket(INDSTOCKS_WS_URL, null, {
-        headers: { Authorization: API_TOKEN.trim() },
+        headers: { Authorization: token },
       });
     }
   } catch (err) {
@@ -172,7 +194,7 @@ export function connectPriceFeed(onQuote, onConnect, onDisconnect) {
 }
 
 function scheduleReconnect(onQuote, onConnect, onDisconnect) {
-  if (intentionalDisconnect || !API_TOKEN?.trim()) return;
+  if (intentionalDisconnect || !getApiToken()) return;
 
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
   reconnectTimeout = setTimeout(() => {

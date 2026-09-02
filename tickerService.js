@@ -284,6 +284,19 @@ function processPriceUpdate(label, price, high, low, volume, open, changeVal) {
 
 // ---------- Public API ----------
 
+import { setApiToken } from "./indstocksClient";
+
+export async function updateIndstocksToken(newToken) {
+  setApiToken(newToken);
+  if (onStatusCallback) onStatusCallback("Updating token & fetching NIFTY / SENSEX...");
+  await Promise.all([
+    bootstrapIndstocks("NIFTY"),
+    bootstrapIndstocks("SENSEX"),
+  ]);
+  if (onStatusCallback) onStatusCallback("INDstocks token updated");
+  if (onDataCallback) onDataCallback(getData());
+}
+
 export function getData() {
   return {
     NIFTY: {
