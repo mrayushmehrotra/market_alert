@@ -112,7 +112,7 @@ export function startRESTPolling(callback, intervalMs = 3000) {
         callback(data);
       }
     } catch (err) {
-      console.error("[CoinDCX Poll] Error:", err.message);
+      console.warn("[CoinDCX Poll] Error:", err.message);
     }
   };
   run();

@@ -149,7 +149,7 @@ async function bootstrapIndstocks(label) {
       direction: last.c >= state[label].vwap ? "above" : "below",
     };
   } catch (err) {
-    console.error(`[Ticker] Bootstrap error ${label}:`, err.message);
+    console.warn(`[Ticker] Bootstrap error ${label}:`, err.message);
     if (err.message.includes("403") || err.message.includes("access_token")) {
       if (onStatusCallback) {
         onStatusCallback("INDstocks API token expired (403). Get a new token from indstocks.com");
@@ -190,7 +190,7 @@ async function bootstrapCoindcx() {
       direction: last.c >= state.SOL.vwap ? "above" : "below",
     };
   } catch (err) {
-    console.error(`[Ticker] Bootstrap error SOL:`, err.message);
+    console.warn(`[Ticker] Bootstrap error SOL:`, err.message);
   }
 }
 

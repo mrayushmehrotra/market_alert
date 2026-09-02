@@ -7,6 +7,7 @@ import {
   StyleSheet,
   SafeAreaView,
   ScrollView,
+  LogBox,
 } from "react-native";
 import { API_TOKEN } from "./config";
 import {
@@ -18,6 +19,15 @@ import {
   onStatus,
   updateIndstocksToken,
 } from "./tickerService";
+
+LogBox.ignoreLogs([
+  "[Ticker]",
+  "[CoinDCX Poll]",
+  "[Poll]",
+  "[WS]",
+  "Historical data fetch failed",
+  "notifee",
+]);
 
 function formatNum(n, isCurrency = false) {
   if (!n || n === 0) return "--";
