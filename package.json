@@ -28,5 +28,12 @@
   },
   "devDependencies": {
     "puppeteer-core": "24"
+  },
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": ["@notifee/react-native", "expo-av"]
+      }
+    }
   }
 }

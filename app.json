@@ -1,43 +1,6 @@
 {
   "expo": {
     "name": "Nifty Sensex Cross Alert",
-    "slug": "nifty-sensex-cross-alert",
-    "scheme": "nifty-alert",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/icon.png",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0b1320"
-    },
-    "android": {
-      "package": "com.yourname.niftysensexcrossalert",
-      "permissions": [
-        "FOREGROUND_SERVICE",
-        "FOREGROUND_SERVICE_DATA_SYNC",
-        "POST_NOTIFICATIONS",
-        "WAKE_LOCK"
-      ]
-    },
-    "web": {
-      "favicon": "./assets/favicon.png",
-      "bundler": "metro"
-    },
-    "plugins": [
-      "./plugins/withNotifeeService.js",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/notification-icon.png",
-          "sounds": ["./assets/sounds/notify.mp3"]
-        }
-      ]
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "a8648987-e813-42bd-ba75-f0317fde88c3"
-      }
-    }
+    "slug": "nifty-sensex-cross-alert"
   }
 }
