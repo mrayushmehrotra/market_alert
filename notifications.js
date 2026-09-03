@@ -2,6 +2,27 @@ import { NativeModules, Platform } from "react-native";
 import Constants from "expo-constants";
 import * as ExpoNotifications from "expo-notifications";
 import * as Device from "expo-device";
+import { Audio } from "expo-av";
+
+// ---------- In-app audio player fallback ----------
+
+let soundObject = null;
+
+async function playAlertSound() {
+  try {
+    if (soundObject) {
+      await soundObject.unloadAsync();
+      soundObject = null;
+    }
+    const { sound } = await Audio.Sound.createAsync(
+      require("./assets/sounds/notify.mp3")
+    );
+    soundObject = sound;
+    await soundObject.playAsync();
+  } catch (err) {
+    console.warn("[Sound] Failed to play in-app alert sound:", err.message);
+  }
+}
 
 // ---------- Notifee (dev client only) ----------
 
@@ -57,7 +78,6 @@ async function requestPermission() {
 
 // ---------- Expo-notifications setup ----------
 
-// Configure how notifications appear when app is in foreground
 ExpoNotifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
@@ -69,19 +89,20 @@ ExpoNotifications.setNotificationHandler({
 });
 
 const TICKER_NOTIFICATION_ID = "nifty-sensex-ticker";
-// Bundled at build time from assets/sounds/notify.mp3 → android/res/raw/notify.mp3
-const CROSS_ALERT_SOUND =
-  Constants.expoConfig?.extra?.CROSS_ALERT_SOUND || "notify";
-const CROSS_ALERTS_CHANNEL_ID = "cross-alerts";
+const CROSS_ALERT_SOUND = "notify";
+const CROSS_ALERTS_CHANNEL_ID = "cross_alerts_v3";
 
 // ---------- Channels ----------
 
 export async function setupChannels() {
-  // Always request permission
   await requestPermission();
 
   if (Platform.OS === "android") {
-    // Set up Android notification channels via expo-notifications
+    try {
+      await ExpoNotifications.deleteNotificationChannelAsync("cross-alerts");
+      await ExpoNotifications.deleteNotificationChannelAsync("cross_alerts");
+    } catch {}
+
     await ExpoNotifications.setNotificationChannelAsync("ticker", {
       name: "Live Price Ticker",
       importance: ExpoNotifications.AndroidImportance.LOW,
@@ -89,14 +110,21 @@ export async function setupChannels() {
     });
 
     await ExpoNotifications.setNotificationChannelAsync(CROSS_ALERTS_CHANNEL_ID, {
-      name: "Cross Alerts",
+      name: "Cross Alerts V3",
       importance: ExpoNotifications.AndroidImportance.HIGH,
       sound: CROSS_ALERT_SOUND,
       lockscreenVisibility: ExpoNotifications.AndroidNotificationVisibility.PUBLIC,
+      vibrationPattern: [0, 250, 250, 250],
+      enableVibrate: true,
     });
   }
 
   if (notifee) {
+    try {
+      await notifee.deleteChannel("cross-alerts");
+      await notifee.deleteChannel("cross_alerts");
+    } catch {}
+
     await notifee.createChannel({
       id: "ticker",
       name: "Live Price Ticker",
@@ -106,10 +134,11 @@ export async function setupChannels() {
 
     await notifee.createChannel({
       id: CROSS_ALERTS_CHANNEL_ID,
-      name: "Cross Alerts",
+      name: "Cross Alerts V3",
       importance: AndroidImportance.HIGH,
       sound: CROSS_ALERT_SOUND,
       visibility: AndroidVisibility.PUBLIC,
+      vibration: true,
     });
   }
 }
@@ -184,6 +213,9 @@ export async function showOrUpdateTickerNotification(data) {
 // ---------- Cross alert notification ----------
 
 export async function showCrossAlert({ label, cross, price, vwap, ema }) {
+  // Play in-app alert sound via expo-av
+  playAlertSound();
+
   const direction = cross === "bullish" ? "crossed ABOVE" : "crossed BELOW";
   const title = `${label} EMA9/VWAP Cross`;
   const body = `EMA9 ${direction} VWAP\nPrice ${formatNumber(price)} | VWAP ${formatNumber(vwap)} | EMA9 ${formatNumber(ema)}`;
