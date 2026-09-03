@@ -24,6 +24,8 @@ export async function setupChannels() {}
 export async function showOrUpdateTickerNotification() {}
 
 export async function showCrossAlert({ label, cross, price, vwap, ema }) {
+  playAlertSound();
+
   try {
     const ok = await ensurePermission();
     if (!ok) return;

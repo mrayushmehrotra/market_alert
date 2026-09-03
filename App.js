@@ -146,6 +146,7 @@ export default function App() {
         ...crossEvent,
         time: new Date().toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata" }),
       });
+      playAlertSound();
     });
 
     onStatus((s) => setStatus(s));
