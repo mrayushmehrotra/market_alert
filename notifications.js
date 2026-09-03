@@ -54,8 +54,16 @@ export function getCustomSoundInfo() {
 
 export async function playAlertSound() {
   try {
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      staysActiveInBackground: true,
+      playsInSilentModeIOS: true,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    });
+
     if (soundObject) {
-      await soundObject.unloadAsync();
+      await soundObject.unloadAsync().catch(() => {});
       soundObject = null;
     }
 
@@ -63,17 +71,19 @@ export async function playAlertSound() {
       ? { uri: customSoundUri }
       : require("./assets/sounds/notify.mp3");
 
-    const { sound } = await Audio.Sound.createAsync(soundSource);
+    const { sound } = await Audio.Sound.createAsync(
+      soundSource,
+      { shouldPlay: true, volume: 1.0 }
+    );
     soundObject = sound;
-    await soundObject.playAsync();
   } catch (err) {
     console.warn("[Sound] Failed to play alert sound, falling back to default:", err.message);
     try {
       const { sound } = await Audio.Sound.createAsync(
-        require("./assets/sounds/notify.mp3")
+        require("./assets/sounds/notify.mp3"),
+        { shouldPlay: true, volume: 1.0 }
       );
       soundObject = sound;
-      await soundObject.playAsync();
     } catch {}
   }
 }

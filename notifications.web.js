@@ -37,11 +37,56 @@ export async function showCrossAlert({ label, cross, price, vwap, ema }) {
   }
 }
 
-export async function loadSavedSoundConfig() {}
-export async function setCustomSound(uri, name) {}
-export function getCustomSoundInfo() {
-  return { uri: null, name: "Default (notify.mp3)", isDefault: true };
+import storage from "./storage";
+
+let customSoundUri = null;
+let customSoundName = null;
+const CUSTOM_SOUND_KEY = "NIFTY_ALERT_CUSTOM_SOUND_URI";
+const CUSTOM_SOUND_NAME_KEY = "NIFTY_ALERT_CUSTOM_SOUND_NAME";
+
+export async function loadSavedSoundConfig() {
+  try {
+    const uri = await storage.getItem(CUSTOM_SOUND_KEY);
+    const name = await storage.getItem(CUSTOM_SOUND_NAME_KEY);
+    if (uri) {
+      customSoundUri = uri;
+      customSoundName = name || "Custom Sound";
+    }
+  } catch {}
 }
-export async function playAlertSound() {}
+
+export async function setCustomSound(uri, name) {
+  customSoundUri = uri || null;
+  customSoundName = name || null;
+  try {
+    if (uri) {
+      await storage.setItem(CUSTOM_SOUND_KEY, uri);
+      if (name) await storage.setItem(CUSTOM_SOUND_NAME_KEY, name);
+    } else {
+      await storage.removeItem(CUSTOM_SOUND_KEY);
+      await storage.removeItem(CUSTOM_SOUND_NAME_KEY);
+    }
+  } catch {}
+}
+
+export function getCustomSoundInfo() {
+  return {
+    uri: customSoundUri,
+    name: customSoundName || "Default (notify.mp3)",
+    isDefault: !customSoundUri,
+  };
+}
+
+export async function playAlertSound() {
+  try {
+    const defaultSound = require("./assets/sounds/notify.mp3");
+    const audioSrc = customSoundUri || defaultSound;
+    const src = typeof audioSrc === "string" ? audioSrc : audioSrc?.default || audioSrc;
+    const audio = new Audio(src);
+    await audio.play();
+  } catch (err) {
+    console.warn("[WebSound] Audio playback error:", err.message);
+  }
+}
 
 export async function cancelTickerNotification() {}
