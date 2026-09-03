@@ -6,6 +6,7 @@ import {
   disconnectPriceFeed,
   startRESTPolling as startIndstocksPolling,
   stopRESTPolling as stopIndstocksPolling,
+  loadSavedApiToken,
 } from "./indstocksClient";
 import {
   fetchHistoricalCandles as fetchCoindcxCandles,
@@ -25,6 +26,7 @@ import {
   showOrUpdateTickerNotification,
   showCrossAlert,
   cancelTickerNotification,
+  loadSavedSoundConfig,
 } from "./notifications";
 
 // ---------- State ----------
@@ -351,6 +353,8 @@ export function onStatus(callback) {
 export async function startTicker() {
   if (onStatusCallback) onStatusCallback("Setting up notifications...");
 
+  await loadSavedApiToken();
+  await loadSavedSoundConfig();
   await setupChannels();
 
   // Reset 6-hour session counters

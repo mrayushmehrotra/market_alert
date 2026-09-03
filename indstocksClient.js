@@ -1,4 +1,5 @@
 import Constants from "expo-constants";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   API_TOKEN,
   INDSTOCKS_BASE_URL,
@@ -7,10 +8,27 @@ import {
   INSTRUMENTS,
 } from "./config";
 
+const TOKEN_STORAGE_KEY = "NIFTY_ALERT_INDMONEY_API_KEY";
+
 let customToken = "";
 
+export async function loadSavedApiToken() {
+  try {
+    const saved = await AsyncStorage.getItem(TOKEN_STORAGE_KEY);
+    if (saved) {
+      customToken = saved.replace(/^["']|["']$/g, "").trim();
+    }
+  } catch {}
+}
+
 export function setApiToken(token) {
-  customToken = (token || "").replace(/^["']|["']$/g, "").trim();
+  const clean = (token || "").replace(/^["']|["']$/g, "").trim();
+  customToken = clean;
+  if (clean) {
+    AsyncStorage.setItem(TOKEN_STORAGE_KEY, clean).catch(() => {});
+  } else {
+    AsyncStorage.removeItem(TOKEN_STORAGE_KEY).catch(() => {});
+  }
 }
 
 export function getApiToken() {

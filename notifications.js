@@ -4,23 +4,75 @@ import * as ExpoNotifications from "expo-notifications";
 import * as Device from "expo-device";
 import { Audio } from "expo-av";
 
-// ---------- In-app audio player fallback ----------
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+// ---------- In-app audio player & custom sound ----------
 
 let soundObject = null;
+let customSoundUri = null;
+let customSoundName = null;
 
-async function playAlertSound() {
+const CUSTOM_SOUND_KEY = "NIFTY_ALERT_CUSTOM_SOUND_URI";
+const CUSTOM_SOUND_NAME_KEY = "NIFTY_ALERT_CUSTOM_SOUND_NAME";
+
+export async function loadSavedSoundConfig() {
+  try {
+    const uri = await AsyncStorage.getItem(CUSTOM_SOUND_KEY);
+    const name = await AsyncStorage.getItem(CUSTOM_SOUND_NAME_KEY);
+    if (uri) {
+      customSoundUri = uri;
+      customSoundName = name || "Custom Sound";
+    }
+  } catch {}
+}
+
+export async function setCustomSound(uri, name) {
+  try {
+    if (uri) {
+      customSoundUri = uri;
+      customSoundName = name || "Custom Sound";
+      await AsyncStorage.setItem(CUSTOM_SOUND_KEY, uri);
+      if (name) await AsyncStorage.setItem(CUSTOM_SOUND_NAME_KEY, name);
+    } else {
+      customSoundUri = null;
+      customSoundName = null;
+      await AsyncStorage.removeItem(CUSTOM_SOUND_KEY);
+      await AsyncStorage.removeItem(CUSTOM_SOUND_NAME_KEY);
+    }
+  } catch {}
+}
+
+export function getCustomSoundInfo() {
+  return {
+    uri: customSoundUri,
+    name: customSoundName || "Default (notify.mp3)",
+    isDefault: !customSoundUri,
+  };
+}
+
+export async function playAlertSound() {
   try {
     if (soundObject) {
       await soundObject.unloadAsync();
       soundObject = null;
     }
-    const { sound } = await Audio.Sound.createAsync(
-      require("./assets/sounds/notify.mp3")
-    );
+
+    const soundSource = customSoundUri
+      ? { uri: customSoundUri }
+      : require("./assets/sounds/notify.mp3");
+
+    const { sound } = await Audio.Sound.createAsync(soundSource);
     soundObject = sound;
     await soundObject.playAsync();
   } catch (err) {
-    console.warn("[Sound] Failed to play in-app alert sound:", err.message);
+    console.warn("[Sound] Failed to play alert sound, falling back to default:", err.message);
+    try {
+      const { sound } = await Audio.Sound.createAsync(
+        require("./assets/sounds/notify.mp3")
+      );
+      soundObject = sound;
+      await soundObject.playAsync();
+    } catch {}
   }
 }
 

@@ -9,6 +9,7 @@ import {
   ScrollView,
   LogBox,
 } from "react-native";
+import * as DocumentPicker from "expo-document-picker";
 import { API_TOKEN } from "./config";
 import {
   startTicker,
@@ -19,6 +20,11 @@ import {
   onStatus,
   updateIndstocksToken,
 } from "./tickerService";
+import {
+  setCustomSound,
+  getCustomSoundInfo,
+  playAlertSound,
+} from "./notifications";
 
 LogBox.ignoreLogs([
   "[Ticker]",
@@ -120,8 +126,10 @@ export default function App() {
   const [lastCross, setLastCross] = useState(null);
   const [tokenInput, setTokenInput] = useState("");
   const [showTokenBox, setShowTokenBox] = useState(false);
+  const [soundInfo, setSoundInfo] = useState(getCustomSoundInfo());
 
   useEffect(() => {
+    setSoundInfo(getCustomSoundInfo());
     onData((d) => {
       setNifty(d.NIFTY);
       setSensex(d.SENSEX);
@@ -163,6 +171,32 @@ export default function App() {
     await updateIndstocksToken(tokenInput.trim());
     setShowTokenBox(false);
     setTokenInput("");
+  }
+
+  async function handlePickSound() {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: "audio/*",
+        copyToCacheDirectory: true,
+      });
+
+      if (!res.canceled && res.assets && res.assets.length > 0) {
+        const file = res.assets[0];
+        await setCustomSound(file.uri, file.name);
+        setSoundInfo(getCustomSoundInfo());
+      }
+    } catch (err) {
+      console.warn("[App] Custom sound pick error:", err.message);
+    }
+  }
+
+  async function handleResetSound() {
+    await setCustomSound(null, null);
+    setSoundInfo(getCustomSoundInfo());
+  }
+
+  function handleTestSound() {
+    playAlertSound();
   }
 
   const isTokenExpired = status.includes("403") || status.includes("expired");
@@ -265,6 +299,29 @@ export default function App() {
           Computes VWAP and EMA9 on 5-minute candles. Plays instant sound alerts when any asset's EMA9 crosses
           VWAP and tracks total crossover count in the persistent top notification panel.
         </Text>
+
+        <View style={styles.soundCard}>
+          <Text style={styles.soundCardTitle}>🔔 Alarm Sound Settings</Text>
+          <Text style={styles.soundCardStatus}>
+            Current Sound: {soundInfo.name}
+          </Text>
+
+          <View style={styles.soundButtonsRow}>
+            <TouchableOpacity style={styles.soundPickButton} onPress={handlePickSound}>
+              <Text style={styles.soundPickButtonText}>📁 Pick Custom Sound (MP3)</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.soundTestButton} onPress={handleTestSound}>
+              <Text style={styles.soundTestButtonText}>▶️ Test Sound</Text>
+            </TouchableOpacity>
+          </View>
+
+          {!soundInfo.isDefault && (
+            <TouchableOpacity style={styles.soundResetButton} onPress={handleResetSound}>
+              <Text style={styles.soundResetButtonText}>🔄 Reset to Default (notify.mp3)</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -495,5 +552,66 @@ const styles = StyleSheet.create({
     color: "#484f58",
     textAlign: "center",
     lineHeight: 16,
+    marginBottom: 20,
+  },
+  soundCard: {
+    width: "100%",
+    backgroundColor: "#161b22",
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: "#30363d",
+    alignItems: "center",
+  },
+  soundCardTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#f0f6fc",
+    marginBottom: 4,
+  },
+  soundCardStatus: {
+    fontSize: 12,
+    color: "#8b949e",
+    marginBottom: 12,
+  },
+  soundButtonsRow: {
+    flexDirection: "row",
+    gap: 10,
+    width: "100%",
+    justifyContent: "center",
+  },
+  soundPickButton: {
+    flex: 1,
+    backgroundColor: "#1f6feb",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  soundPickButtonText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  soundTestButton: {
+    backgroundColor: "#238636",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  soundTestButtonText: {
+    color: "#ffffff",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  soundResetButton: {
+    marginTop: 10,
+    paddingVertical: 6,
+  },
+  soundResetButtonText: {
+    color: "#f85149",
+    fontSize: 12,
   },
 });
