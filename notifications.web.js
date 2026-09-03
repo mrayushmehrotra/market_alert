@@ -68,6 +68,29 @@ export async function setCustomSound(uri, name) {
   } catch {}
 }
 
+function getAssetUri(assetModule) {
+  if (!assetModule) return null;
+  if (typeof assetModule === "string") return assetModule;
+
+  if (typeof assetModule === "object") {
+    if (assetModule.uri) return assetModule.uri;
+    if (assetModule.default) {
+      if (typeof assetModule.default === "string") return assetModule.default;
+      if (assetModule.default.uri) return assetModule.default.uri;
+    }
+  }
+
+  try {
+    const resolve = Image?.resolveAssetSource || (Image?.default && Image.default.resolveAssetSource);
+    if (typeof resolve === "function") {
+      const res = resolve(assetModule);
+      if (res && res.uri) return res.uri;
+    }
+  } catch (e) {}
+
+  return "./assets/sounds/notify.mp3";
+}
+
 export function getCustomSoundInfo() {
   return {
     uri: customSoundUri,
@@ -80,8 +103,7 @@ export async function playAlertSound() {
   try {
     let src = customSoundUri;
     if (!src) {
-      const resolved = Image.resolveAssetSource(require("./assets/sounds/notify.mp3"));
-      src = resolved ? resolved.uri : null;
+      src = getAssetUri(require("./assets/sounds/notify.mp3"));
     }
     if (!src) {
       console.warn("[WebSound] Could not resolve sound asset source.");
