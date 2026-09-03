@@ -37,4 +37,11 @@ export async function showCrossAlert({ label, cross, price, vwap, ema }) {
   }
 }
 
+export async function loadSavedSoundConfig() {}
+export async function setCustomSound(uri, name) {}
+export function getCustomSoundInfo() {
+  return { uri: null, name: "Default (notify.mp3)", isDefault: true };
+}
+export async function playAlertSound() {}
+
 export async function cancelTickerNotification() {}
