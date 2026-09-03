@@ -8,6 +8,7 @@ import {
   SafeAreaView,
   ScrollView,
   LogBox,
+  Platform,
 } from "react-native";
 import * as DocumentPicker from "expo-document-picker";
 import { API_TOKEN } from "./config";
@@ -175,6 +176,27 @@ export default function App() {
 
   async function handlePickSound() {
     try {
+      if (Platform.OS === "web" && typeof document !== "undefined") {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "audio/*";
+        input.onchange = async (e) => {
+          const file = e.target?.files?.[0];
+          if (file) {
+            const url = URL.createObjectURL(file);
+            await setCustomSound(url, file.name);
+            setSoundInfo(getCustomSoundInfo());
+          }
+        };
+        input.click();
+        return;
+      }
+
+      if (!DocumentPicker || typeof DocumentPicker.getDocumentAsync !== "function") {
+        console.warn("[App] DocumentPicker is unavailable in this environment.");
+        return;
+      }
+
       const res = await DocumentPicker.getDocumentAsync({
         type: "audio/*",
         copyToCacheDirectory: true,
