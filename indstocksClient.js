@@ -57,6 +57,10 @@ export async function fetchHistoricalCandles(scripCode, startTimeMs, endTimeMs) 
     headers: { Authorization: token },
   });
 
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`TOKEN_EXPIRED: INDmoney API Token Expired (${res.status})`);
+  }
+
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`Historical data fetch failed (${res.status}): ${text}`);
@@ -80,6 +84,10 @@ export async function fetchLTP(scripCodes) {
   const res = await fetch(url, {
     headers: { Authorization: token },
   });
+
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`TOKEN_EXPIRED: INDmoney API Token Expired (${res.status})`);
+  }
 
   if (!res.ok) {
     const text = await res.text();

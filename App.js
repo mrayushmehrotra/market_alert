@@ -149,7 +149,12 @@ export default function App() {
       playAlertSound();
     });
 
-    onStatus((s) => setStatus(s));
+    onStatus((s) => {
+      setStatus(s);
+      if (typeof s === "string" && s.includes("Token Expired")) {
+        setShowTokenBox(true);
+      }
+    });
   }, []);
 
   async function handleStart() {

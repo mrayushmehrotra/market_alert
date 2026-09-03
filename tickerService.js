@@ -152,9 +152,14 @@ async function bootstrapIndstocks(label) {
     };
   } catch (err) {
     console.warn(`[Ticker] Bootstrap error ${label}:`, err.message);
-    if (err.message.includes("403") || err.message.includes("access_token")) {
+    if (
+      err.message.includes("TOKEN_EXPIRED") ||
+      err.message.includes("403") ||
+      err.message.includes("401") ||
+      err.message.includes("access_token")
+    ) {
       if (onStatusCallback) {
-        onStatusCallback("INDstocks API token expired (403). Get a new token from indstocks.com");
+        onStatusCallback("⚠️ INDmoney Token Expired — Please update token");
       }
     }
   }
