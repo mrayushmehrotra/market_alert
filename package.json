@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "main": "expo/AppEntry",
   "scripts": {
-    "start": "expo start",
+    "start": "expo start --go",
+    "start:dev": "expo start --dev-client",
     "web": "expo start --web",
     "android": "expo run:android"
   },

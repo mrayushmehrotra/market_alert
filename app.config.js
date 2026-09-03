@@ -45,6 +45,7 @@ module.exports = {
   expo: {
     name: "Nifty Sensex Cross Alert",
     slug: "nifty-sensex-cross-alert",
+    scheme: "nifty-alert",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/icon.png",
