@@ -3,7 +3,8 @@
 // this module is a web-safe stub: it logs telemetry and can use the standard
 // Web Notifications API for cross alerts.
 
-import { Platform } from "react-native";
+import { Platform, Image } from "react-native";
+import storage from "./storage";
 
 let permission = Platform.OS === "web" ? Notification?.permission : "denied";
 
@@ -36,8 +37,6 @@ export async function showCrossAlert({ label, cross, price, vwap, ema }) {
     console.error("[notifications.web] Failed to show cross alert:", err);
   }
 }
-
-import storage from "./storage";
 
 let customSoundUri = null;
 let customSoundName = null;
@@ -79,13 +78,25 @@ export function getCustomSoundInfo() {
 
 export async function playAlertSound() {
   try {
-    const defaultSound = require("./assets/sounds/notify.mp3");
-    const audioSrc = customSoundUri || defaultSound;
-    const src = typeof audioSrc === "string" ? audioSrc : audioSrc?.default || audioSrc;
+    let src = customSoundUri;
+    if (!src) {
+      const resolved = Image.resolveAssetSource(require("./assets/sounds/notify.mp3"));
+      src = resolved ? resolved.uri : null;
+    }
+    if (!src) {
+      console.warn("[WebSound] Could not resolve sound asset source.");
+      return;
+    }
+
     const audio = new Audio(src);
+    audio.volume = 1.0;
     await audio.play();
   } catch (err) {
-    console.warn("[WebSound] Audio playback error:", err.message);
+    if (err.name === "NotAllowedError") {
+      console.warn("[WebSound] Chrome blocked autoplay until user interacts with the page (click anywhere on the page first).");
+    } else {
+      console.warn("[WebSound] Audio playback error:", err.message);
+    }
   }
 }
 
