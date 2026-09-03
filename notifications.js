@@ -92,6 +92,13 @@ if (hasNotifeeNative) {
     AndroidImportance = mod.AndroidImportance || {};
     AndroidVisibility = mod.AndroidVisibility || {};
     EventType = mod.EventType || {};
+
+    // Register required Android foreground service task runner
+    notifee.registerForegroundService(() => {
+      return new Promise(() => {
+        // Keeps foreground service active
+      });
+    });
   } catch (e) {
     console.warn("[notifications] Failed to load notifee:", e.message);
   }
@@ -222,7 +229,7 @@ function formatTickerBody(data) {
     const arr = data.SOL.direction === "above" ? "▲" : "▼";
     parts.push(`SOL: $${formatNumber(data.SOL.price)}${arr}`);
   }
-  return parts.length > 0 ? parts.join(" | ") : "Monitoring Active";
+  return parts.join(" | ") || "Monitoring active...";
 }
 
 function formatTickerSubText(data) {
@@ -240,26 +247,47 @@ function formatTickerSubText(data) {
 }
 
 export async function showOrUpdateTickerNotification(data) {
+  const title = formatTickerTitle(data);
+  const body = formatTickerBody(data);
+  const subtitle = formatTickerSubText(data);
+
   if (notifee) {
-    // Notifee: persistent foreground service notification
-    await notifee.displayNotification({
-      id: TICKER_NOTIFICATION_ID,
-      title: formatTickerTitle(data),
-      body: formatTickerBody(data),
-      subtitle: formatTickerSubText(data),
-      android: {
-        channelId: "ticker",
-        asForegroundService: true,
-        ongoing: true,
-        smallIcon: "ic_launcher",
-        color: "#1DB954",
-        onlyAlertOnce: true,
-      },
-    });
+    try {
+      await notifee.displayNotification({
+        id: TICKER_NOTIFICATION_ID,
+        title,
+        body,
+        subtitle,
+        android: {
+          channelId: "ticker",
+          asForegroundService: true,
+          ongoing: true,
+          smallIcon: "ic_launcher",
+          color: "#1DB954",
+          onlyAlertOnce: true,
+          pressAction: { id: "default" },
+        },
+      });
+    } catch (err) {
+      console.warn("[Notifee] Foreground service error, attempting ongoing fallback:", err.message);
+      try {
+        await notifee.displayNotification({
+          id: TICKER_NOTIFICATION_ID,
+          title,
+          body,
+          subtitle,
+          android: {
+            channelId: "ticker",
+            ongoing: true,
+            smallIcon: "ic_launcher",
+            color: "#1DB954",
+            onlyAlertOnce: true,
+            pressAction: { id: "default" },
+          },
+        });
+      } catch {}
+    }
   }
-  // Expo Go fallback: we don't spam ticker updates as individual notifications
-  // since expo-notifications can't do persistent/ongoing notifications.
-  // The ticker notification is skipped; only cross alerts fire.
 }
 
 // ---------- Cross alert notification ----------
