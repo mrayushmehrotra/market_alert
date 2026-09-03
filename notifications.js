@@ -4,7 +4,7 @@ import * as ExpoNotifications from "expo-notifications";
 import * as Device from "expo-device";
 import { Audio } from "expo-av";
 
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import storage from "./storage";
 
 // ---------- In-app audio player & custom sound ----------
 
@@ -17,29 +17,31 @@ const CUSTOM_SOUND_NAME_KEY = "NIFTY_ALERT_CUSTOM_SOUND_NAME";
 
 export async function loadSavedSoundConfig() {
   try {
-    const uri = await AsyncStorage.getItem(CUSTOM_SOUND_KEY);
-    const name = await AsyncStorage.getItem(CUSTOM_SOUND_NAME_KEY);
+    const uri = await storage.getItem(CUSTOM_SOUND_KEY);
+    const name = await storage.getItem(CUSTOM_SOUND_NAME_KEY);
     if (uri) {
       customSoundUri = uri;
       customSoundName = name || "Custom Sound";
     }
-  } catch {}
+  } catch (err) {
+    console.warn("[Sound] Error loading saved sound:", err.message);
+  }
 }
 
 export async function setCustomSound(uri, name) {
+  customSoundUri = uri || null;
+  customSoundName = name || null;
   try {
     if (uri) {
-      customSoundUri = uri;
-      customSoundName = name || "Custom Sound";
-      await AsyncStorage.setItem(CUSTOM_SOUND_KEY, uri);
-      if (name) await AsyncStorage.setItem(CUSTOM_SOUND_NAME_KEY, name);
+      await storage.setItem(CUSTOM_SOUND_KEY, uri);
+      if (name) await storage.setItem(CUSTOM_SOUND_NAME_KEY, name);
     } else {
-      customSoundUri = null;
-      customSoundName = null;
-      await AsyncStorage.removeItem(CUSTOM_SOUND_KEY);
-      await AsyncStorage.removeItem(CUSTOM_SOUND_NAME_KEY);
+      await storage.removeItem(CUSTOM_SOUND_KEY);
+      await storage.removeItem(CUSTOM_SOUND_NAME_KEY);
     }
-  } catch {}
+  } catch (err) {
+    console.warn("[Sound] Error saving sound config:", err.message);
+  }
 }
 
 export function getCustomSoundInfo() {

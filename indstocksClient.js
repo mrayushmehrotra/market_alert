@@ -1,5 +1,5 @@
 import Constants from "expo-constants";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import storage from "./storage";
 import {
   API_TOKEN,
   INDSTOCKS_BASE_URL,
@@ -14,7 +14,7 @@ let customToken = "";
 
 export async function loadSavedApiToken() {
   try {
-    const saved = await AsyncStorage.getItem(TOKEN_STORAGE_KEY);
+    const saved = await storage.getItem(TOKEN_STORAGE_KEY);
     if (saved) {
       customToken = saved.replace(/^["']|["']$/g, "").trim();
     }
@@ -25,9 +25,9 @@ export function setApiToken(token) {
   const clean = (token || "").replace(/^["']|["']$/g, "").trim();
   customToken = clean;
   if (clean) {
-    AsyncStorage.setItem(TOKEN_STORAGE_KEY, clean).catch(() => {});
+    storage.setItem(TOKEN_STORAGE_KEY, clean);
   } else {
-    AsyncStorage.removeItem(TOKEN_STORAGE_KEY).catch(() => {});
+    storage.removeItem(TOKEN_STORAGE_KEY);
   }
 }
 
