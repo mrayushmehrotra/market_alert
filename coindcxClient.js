@@ -2,6 +2,8 @@ import {
   COINDCX_PUBLIC_URL,
   COINDCX_REST_URL,
   CANDLE_INTERVAL,
+  CANDLE_INTERVAL_4H,
+  CANDLE_INTERVAL_1D,
   INSTRUMENTS,
 } from "./config";
 
@@ -18,7 +20,7 @@ export async function fetchHistoricalCandles(
 
   const res = await fetch(url);
   if (!res.ok) {
-    // Fallback attempt with SOL_USDT if B-SOL_USDT fails
+    // Fallback attempt with alternate pair prefix
     const altPair = pair.startsWith("B-") ? pair.replace("B-", "") : `B-${pair}`;
     const altUrl = `${COINDCX_PUBLIC_URL}/market_data/candles/?pair=${altPair}&interval=${interval}&limit=${limit}`;
     const altRes = await fetch(altUrl);
@@ -99,15 +101,55 @@ export async function fetchLTP(market = INSTRUMENTS.SOL.market) {
   };
 }
 
-// ---------- REST Polling ----------
+/**
+ * Fetch LTP data for multiple markets in a single API call.
+ * Returns an object keyed by market name, e.g. { SOL_USDT: {...}, XAU_USDT: {...} }
+ */
+export async function fetchLTPMulti(markets = [INSTRUMENTS.SOL.market, INSTRUMENTS.XAU.market]) {
+  const url = `${COINDCX_REST_URL}/exchange/ticker`;
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`CoinDCX ticker fetch failed (${res.status}): ${text}`);
+  }
+
+  const list = await res.json();
+  if (!Array.isArray(list)) return {};
+
+  const result = {};
+  for (const market of markets) {
+    const item = list.find(
+      (t) =>
+        t.market === market ||
+        t.market === market.replace("_", "") ||
+        t.symbol === market
+    );
+    if (item) {
+      result[market] = {
+        price: parseFloat(item.last_price || 0),
+        high: parseFloat(item.high || 0),
+        low: parseFloat(item.low || 0),
+        volume: parseFloat(item.volume || 0),
+        change: parseFloat(item.change_24_hour || 0),
+        bid: parseFloat(item.bid || 0),
+        ask: parseFloat(item.ask || 0),
+      };
+    }
+  }
+  return result;
+}
+
+// ---------- REST Polling (Multi-Market) ----------
 
 let pollTimer = null;
 
 export function startRESTPolling(callback, intervalMs = 3000) {
   stopRESTPolling();
+  const markets = [INSTRUMENTS.SOL.market, INSTRUMENTS.XAU.market];
   const run = async () => {
     try {
-      const data = await fetchLTP();
+      const data = await fetchLTPMulti(markets);
       if (data && callback) {
         callback(data);
       }
@@ -125,3 +167,4 @@ export function stopRESTPolling() {
     pollTimer = null;
   }
 }
+

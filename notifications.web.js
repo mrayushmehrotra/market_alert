@@ -4,7 +4,6 @@
 // Web Notifications API for cross alerts.
 
 import { Platform, Image } from "react-native";
-import storage from "./storage";
 
 let permission = Platform.OS === "web" ? Notification?.permission : "denied";
 
@@ -23,51 +22,51 @@ export async function setupChannels() {}
 // No persistent Spotify-style notification on web — no-op.
 export async function showOrUpdateTickerNotification() {}
 
-export async function showCrossAlert({ label, cross, price, vwap, ema }) {
+export async function showCrossAlert(payload = {}) {
   playAlertSound();
 
   try {
     const ok = await ensurePermission();
     if (!ok) return;
 
-    const direction = cross === "bullish" ? "crossed ABOVE" : "crossed BELOW";
-    const title = `${label} EMA9/VWAP Cross`;
-    const body = `EMA9 ${direction} VWAP\nPrice ${price} | VWAP ${vwap} | EMA9 ${ema}`;
+    const { type, label, cross, direction, price, vwap, ema, sma, supertrend, value } = payload;
+    let title = "";
+    let body = "";
 
-    new Notification(title, { body, tag: "cross-alert" });
+    if (type === "supertrend") {
+      const isBullish = cross === "bullish" || direction === "bullish" || direction === 1;
+      const dir = isBullish ? "BULLISH (uptrend)" : "BEARISH (downtrend)";
+      title = `${label} Supertrend Flip`;
+      body = payload.body || `Supertrend flipped ${dir}`;
+      if (!payload.body) {
+        const parts = [];
+        if (price != null) parts.push(`Price ${price}`);
+        const stVal = supertrend ?? value;
+        if (stVal != null) parts.push(`Supertrend ${stVal}`);
+        if (parts.length) body += `\n${parts.join(" | ")}`;
+      }
+    } else if (type === "sma") {
+      const isAbove = cross === "bullish" || direction === "bullish" || cross === "above";
+      const action = isAbove ? "closed ABOVE" : "closed BELOW";
+      title = `${label} SMA Daily Cross`;
+      body = payload.body || `Daily candle ${action} SMA`;
+      if (!payload.body) {
+        const parts = [];
+        if (price != null) parts.push(`Price ${price}`);
+        const smaVal = sma ?? value;
+        if (smaVal != null) parts.push(`SMA ${smaVal}`);
+        if (parts.length) body += `\n${parts.join(" | ")}`;
+      }
+    } else {
+      const dir = cross === "bullish" ? "crossed ABOVE" : "crossed BELOW";
+      title = `${label} EMA9/VWAP Cross`;
+      body = payload.body || `EMA9 ${dir} VWAP\nPrice ${price} | VWAP ${vwap} | EMA9 ${ema}`;
+    }
+
+    new Notification(title, { body, tag: payload.tag || "cross-alert" });
   } catch (err) {
     console.error("[notifications.web] Failed to show cross alert:", err);
   }
-}
-
-let customSoundUri = null;
-let customSoundName = null;
-const CUSTOM_SOUND_KEY = "NIFTY_ALERT_CUSTOM_SOUND_URI";
-const CUSTOM_SOUND_NAME_KEY = "NIFTY_ALERT_CUSTOM_SOUND_NAME";
-
-export async function loadSavedSoundConfig() {
-  try {
-    const uri = await storage.getItem(CUSTOM_SOUND_KEY);
-    const name = await storage.getItem(CUSTOM_SOUND_NAME_KEY);
-    if (uri) {
-      customSoundUri = uri;
-      customSoundName = name || "Custom Sound";
-    }
-  } catch {}
-}
-
-export async function setCustomSound(uri, name) {
-  customSoundUri = uri || null;
-  customSoundName = name || null;
-  try {
-    if (uri) {
-      await storage.setItem(CUSTOM_SOUND_KEY, uri);
-      if (name) await storage.setItem(CUSTOM_SOUND_NAME_KEY, name);
-    } else {
-      await storage.removeItem(CUSTOM_SOUND_KEY);
-      await storage.removeItem(CUSTOM_SOUND_NAME_KEY);
-    }
-  } catch {}
 }
 
 function getAssetUri(assetModule) {
@@ -93,31 +92,19 @@ function getAssetUri(assetModule) {
   return "./assets/sounds/notify.mp3";
 }
 
-export function getCustomSoundInfo() {
-  return {
-    uri: customSoundUri,
-    name: customSoundName || "Default (notify.mp3)",
-    isDefault: !customSoundUri,
-  };
-}
-
 export async function playAlertSound() {
   try {
-    let src = customSoundUri;
-    if (!src) {
-      src = getAssetUri(require("./assets/sounds/notify.mp3"));
-    }
+    const src = getAssetUri(require("./assets/sounds/notify.mp3"));
     if (!src) {
       console.warn("[WebSound] Could not resolve sound asset source.");
       return;
     }
-
     const audio = new Audio(src);
     audio.volume = 1.0;
     await audio.play();
   } catch (err) {
     if (err.name === "NotAllowedError") {
-      console.warn("[WebSound] Chrome blocked autoplay until user interacts with the page (click anywhere on the page first).");
+      console.warn("[WebSound] Chrome blocked autoplay until user interacts with the page.");
     } else {
       console.warn("[WebSound] Audio playback error:", err.message);
     }

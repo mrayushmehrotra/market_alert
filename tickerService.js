@@ -1,4 +1,13 @@
-import { INSTRUMENTS, EMA_PERIOD, CANDLE_INTERVAL_INDSTOCKS, CANDLE_INTERVAL_COINDCX } from "./config";
+import {
+  INSTRUMENTS,
+  EMA_PERIOD,
+  CANDLE_INTERVAL_INDSTOCKS,
+  CANDLE_INTERVAL_4H,
+  CANDLE_INTERVAL_1D,
+  SUPERTREND_ATR_LENGTH,
+  SUPERTREND_FACTOR,
+  SMA_PERIOD,
+} from "./config";
 import {
   fetchHistoricalCandles as fetchIndstocksCandles,
   connectPriceFeed,
@@ -20,13 +29,17 @@ import {
   updateEMA9,
   detectCross,
   createIndicatorState,
+  computeSupertrendFromCandles,
+  detectSupertrendFlip,
+  computeSMAFromCloses,
+  detectSMACross,
+  createCryptoIndicatorState,
 } from "./indicators";
 import {
   setupChannels,
   showOrUpdateTickerNotification,
   showCrossAlert,
   cancelTickerNotification,
-  loadSavedSoundConfig,
 } from "./notifications";
 
 // ---------- State ----------
@@ -37,22 +50,32 @@ let crossCount = 0;
 let sessionTimer = null;
 let sessionRunning = false;
 
+// Indian stock indicators (EMA9/VWAP — unchanged)
 const state = {
   NIFTY: createIndicatorState(),
   SENSEX: createIndicatorState(),
-  SOL: createIndicatorState(),
+};
+
+// Crypto indicators (Supertrend 4H + SMA 1D)
+const cryptoState = {
+  SOL: createCryptoIndicatorState(),
+  XAU: createCryptoIndicatorState(),
 };
 
 const latestPrices = {
   NIFTY: { price: 0, open: 0, high: 0, low: 0, volume: 0, change: 0, direction: "above" },
   SENSEX: { price: 0, open: 0, high: 0, low: 0, volume: 0, change: 0, direction: "above" },
   SOL: { price: 0, open: 0, high: 0, low: 0, volume: 0, change: 0, direction: "above" },
+  XAU: { price: 0, open: 0, high: 0, low: 0, volume: 0, change: 0, direction: "above" },
 };
 
-let lastCandleTs = { NIFTY: 0, SENSEX: 0, SOL: 0 };
+let lastCandleTs = { NIFTY: 0, SENSEX: 0 };
 let onDataCallback = null;
 let onCrossCallback = null;
 let onStatusCallback = null;
+
+// Candle polling timer for crypto (60s refresh for 4H/1D candles)
+let candlePollTimer = null;
 
 // ---------- Helpers ----------
 
@@ -103,7 +126,7 @@ function getTodayMarketOpenMs() {
   return openIST.getTime() - IST_OFFSET_MS;
 }
 
-// ---------- Bootstrap indicators ----------
+// ---------- Bootstrap: Indian Stocks (EMA9/VWAP — UNCHANGED) ----------
 
 async function bootstrapIndstocks(label) {
   const inst = INSTRUMENTS[label];
@@ -165,43 +188,159 @@ async function bootstrapIndstocks(label) {
   }
 }
 
-async function bootstrapCoindcx() {
-  const inst = INSTRUMENTS.SOL;
-  if (!inst) return;
+// ---------- Bootstrap: Crypto Supertrend (4H) + SMA (1D) ----------
+
+async function bootstrapCryptoSupertrend(key) {
+  const inst = INSTRUMENTS[key];
+  if (!inst || !inst.pair) return;
 
   try {
-    const candles = await fetchCoindcxCandles(inst.pair, CANDLE_INTERVAL_COINDCX, 500);
-    if (!candles || candles.length === 0) return;
+    // Fetch 4H candles for Supertrend (500 candles = ~83 days of 4H data)
+    const candles4H = await fetchCoindcxCandles(inst.pair, CANDLE_INTERVAL_4H, 500);
+    if (candles4H && candles4H.length > 0) {
+      candles4H.sort((a, b) => a.ts - b.ts);
+      const st = computeSupertrendFromCandles(candles4H, SUPERTREND_ATR_LENGTH, SUPERTREND_FACTOR);
+      cryptoState[key].supertrendValue = st.value;
+      cryptoState[key].supertrendDirection = st.direction;
+      cryptoState[key].lastClose = candles4H[candles4H.length - 1].c;
+      console.log(`[Ticker] ${key} Supertrend bootstrapped: value=${round2(st.value)}, direction=${st.direction === 1 ? "UP" : "DOWN"}`);
+    }
 
-    candles.sort((a, b) => a.ts - b.ts);
+    // Fetch 1D candles for SMA (500 candles = ~500 days)
+    const candles1D = await fetchCoindcxCandles(inst.pair, CANDLE_INTERVAL_1D, 500);
+    if (candles1D && candles1D.length > 0) {
+      candles1D.sort((a, b) => a.ts - b.ts);
+      const closes = candles1D.map((c) => c.c);
+      cryptoState[key].sma = computeSMAFromCloses(closes, SMA_PERIOD);
+      cryptoState[key].lastDailyClose = closes[closes.length - 1] || 0;
+      // Store previous day's close and SMA for cross detection
+      if (closes.length >= 2) {
+        cryptoState[key].prevDailyClose = closes[closes.length - 2];
+        const prevCloses = closes.slice(0, -1);
+        cryptoState[key].prevSMA = computeSMAFromCloses(prevCloses, SMA_PERIOD);
+      }
+      console.log(`[Ticker] ${key} SMA(${SMA_PERIOD}) bootstrapped: value=${round2(cryptoState[key].sma)}, lastClose=${round2(cryptoState[key].lastDailyClose)}`);
+    }
 
-    const vwapResult = computeVWAPFromCandles(candles);
-    state.SOL.vwap = vwapResult.vwap;
-    state.SOL.cumVolume = vwapResult.cumVolume;
-    state.SOL.cumTypicalVolume = vwapResult.cumTypicalVolume;
-
-    const closes = candles.map((c) => c.c);
-    state.SOL.ema9 = computeEMA9FromCloses(closes, EMA_PERIOD);
-    state.SOL.lastClose = closes[closes.length - 1] || 0;
-
-    lastCandleTs.SOL = candles[candles.length - 1].ts;
-
-    const last = candles[candles.length - 1];
-    latestPrices.SOL = {
-      price: last.c,
-      open: last.o,
-      high: last.h,
-      low: last.l,
-      volume: last.v,
-      change: 0,
-      direction: last.c >= state.SOL.vwap ? "above" : "below",
-    };
+    // Set initial price from latest candle if no LTP yet
+    if (latestPrices[key].price === 0 && candles4H && candles4H.length > 0) {
+      const last = candles4H[candles4H.length - 1];
+      latestPrices[key] = {
+        price: last.c,
+        open: last.o,
+        high: last.h,
+        low: last.l,
+        volume: last.v,
+        change: 0,
+        direction: cryptoState[key].supertrendDirection === 1 ? "above" : "below",
+      };
+    }
   } catch (err) {
-    console.warn(`[Ticker] Bootstrap error SOL:`, err.message);
+    console.warn(`[Ticker] Bootstrap error ${key}:`, err.message);
   }
 }
 
-// ---------- Real-time tick handlers ----------
+// ---------- Candle Polling for Crypto (60s) ----------
+
+/**
+ * Poll 4H and 1D candles every 60s for all crypto pairs.
+ * Only processes CLOSED candles ("Wait for timeframe closes" logic).
+ * Detects Supertrend direction flips and SMA crosses.
+ */
+async function pollCryptoCandles() {
+  for (const key of ["SOL", "XAU"]) {
+    const inst = INSTRUMENTS[key];
+    if (!inst || !inst.pair) continue;
+
+    try {
+      // --- Supertrend on 4H closed candles ---
+      const candles4H = await fetchCoindcxCandles(inst.pair, CANDLE_INTERVAL_4H, 500);
+      if (candles4H && candles4H.length > 0) {
+        candles4H.sort((a, b) => a.ts - b.ts);
+
+        const prevDirection = cryptoState[key].supertrendDirection;
+        const st = computeSupertrendFromCandles(candles4H, SUPERTREND_ATR_LENGTH, SUPERTREND_FACTOR);
+        cryptoState[key].supertrendValue = st.value;
+        cryptoState[key].supertrendDirection = st.direction;
+        cryptoState[key].lastClose = candles4H[candles4H.length - 1].c;
+
+        // Detect Supertrend flip (only on closed candles)
+        const flip = detectSupertrendFlip(prevDirection, st.direction);
+        if (flip) {
+          crossCount++;
+          const crossPayload = {
+            type: "supertrend",
+            label: inst.label,
+            cross: flip,
+            price: latestPrices[key].price || candles4H[candles4H.length - 1].c,
+            supertrend: round2(st.value),
+            direction: st.direction === 1 ? "Bullish" : "Bearish",
+          };
+          console.log(`[Ticker] 🔔 ${key} SUPERTREND FLIP: ${flip.toUpperCase()}`);
+          if (onCrossCallback) onCrossCallback(crossPayload);
+          showCrossAlert(crossPayload);
+        }
+      }
+
+      // --- SMA on 1D closed candles ---
+      const candles1D = await fetchCoindcxCandles(inst.pair, CANDLE_INTERVAL_1D, 500);
+      if (candles1D && candles1D.length > 0) {
+        candles1D.sort((a, b) => a.ts - b.ts);
+        const closes = candles1D.map((c) => c.c);
+        const newSMA = computeSMAFromCloses(closes, SMA_PERIOD);
+        const newClose = closes[closes.length - 1] || 0;
+
+        // Detect SMA cross (only when a new daily candle has closed)
+        const prevClose = cryptoState[key].lastDailyClose;
+        const prevSMA = cryptoState[key].sma;
+
+        if (newClose !== prevClose && prevClose > 0) {
+          const smaCross = detectSMACross(prevClose, prevSMA, newClose, newSMA);
+          if (smaCross) {
+            crossCount++;
+            const crossPayload = {
+              type: "sma",
+              label: inst.label,
+              cross: smaCross,
+              price: newClose,
+              sma: round2(newSMA),
+              direction: smaCross === "bullish" ? "Above SMA" : "Below SMA",
+            };
+            console.log(`[Ticker] 🔔 ${key} SMA CROSS: ${smaCross.toUpperCase()}`);
+            if (onCrossCallback) onCrossCallback(crossPayload);
+            showCrossAlert(crossPayload);
+          }
+        }
+
+        // Update stored SMA state
+        cryptoState[key].prevDailyClose = cryptoState[key].lastDailyClose;
+        cryptoState[key].prevSMA = cryptoState[key].sma;
+        cryptoState[key].lastDailyClose = newClose;
+        cryptoState[key].sma = newSMA;
+      }
+    } catch (err) {
+      console.warn(`[Ticker] Candle poll error ${key}:`, err.message);
+    }
+  }
+
+  // Refresh UI after candle poll
+  showOrUpdateTickerNotification(getData());
+  if (onDataCallback) onDataCallback(getData());
+}
+
+function startCandlePolling(intervalMs = 60000) {
+  stopCandlePolling();
+  candlePollTimer = setInterval(pollCryptoCandles, intervalMs);
+}
+
+function stopCandlePolling() {
+  if (candlePollTimer) {
+    clearInterval(candlePollTimer);
+    candlePollTimer = null;
+  }
+}
+
+// ---------- Real-time tick handlers (Indian Stocks — UNCHANGED) ----------
 
 function handleIndstocksQuote(msg) {
   const { instrument, data } = msg;
@@ -217,20 +356,46 @@ function handleIndstocksQuote(msg) {
   const price = data.ltp || data.close || latestPrices[label].price;
   if (!price) return;
 
-  processPriceUpdate(label, price, data.high, data.low, data.volume, data.open);
+  processIndstocksPriceUpdate(label, price, data.high, data.low, data.volume, data.open);
 }
 
 function handleIndstocksRESTPoll({ NIFTY: nPrice, SENSEX: sPrice }) {
-  if (nPrice) processPriceUpdate("NIFTY", nPrice);
-  if (sPrice) processPriceUpdate("SENSEX", sPrice);
+  if (nPrice) processIndstocksPriceUpdate("NIFTY", nPrice);
+  if (sPrice) processIndstocksPriceUpdate("SENSEX", sPrice);
 }
 
-function handleCoindcxTick(data) {
-  if (!data || !data.price) return;
-  processPriceUpdate("SOL", data.price, data.high, data.low, data.volume, null, data.change);
+/**
+ * Handle multi-market CoinDCX LTP data.
+ * Only updates live price display — indicator processing is done via candle polling.
+ */
+function handleCoindcxMultiTick(data) {
+  if (!data || typeof data !== "object") return;
+
+  for (const key of ["SOL", "XAU"]) {
+    const inst = INSTRUMENTS[key];
+    if (!inst) continue;
+
+    const tickData = data[inst.market];
+    if (!tickData || !tickData.price) continue;
+
+    // Update live price display only (indicators are computed from candle polling)
+    latestPrices[key] = {
+      price: tickData.price,
+      high: tickData.high || latestPrices[key].high,
+      low: tickData.low || latestPrices[key].low,
+      volume: tickData.volume || latestPrices[key].volume,
+      change: tickData.change || latestPrices[key].change,
+      open: latestPrices[key].open || tickData.price,
+      direction: cryptoState[key].supertrendDirection === 1 ? "above" : "below",
+    };
+  }
+
+  showOrUpdateTickerNotification(getData());
+  if (onDataCallback) onDataCallback(getData());
 }
 
-function processPriceUpdate(label, price, high, low, volume, open, changeVal) {
+// Indian stocks price processing (EMA9/VWAP — UNCHANGED logic)
+function processIndstocksPriceUpdate(label, price, high, low, volume, open, changeVal) {
   const prevEMA = state[label].ema9;
   const prevVWAP = state[label].vwap;
 
@@ -336,8 +501,23 @@ export function getData() {
       volume: latestPrices.SOL.volume,
       change: latestPrices.SOL.change,
       direction: latestPrices.SOL.direction,
-      vwap: round2(state.SOL.vwap),
-      ema9: round2(state.SOL.ema9),
+      supertrend: round2(cryptoState.SOL.supertrendValue),
+      supertrendDirection: cryptoState.SOL.supertrendDirection,
+      sma: round2(cryptoState.SOL.sma),
+      lastDailyClose: round2(cryptoState.SOL.lastDailyClose),
+    },
+    XAU: {
+      price: latestPrices.XAU.price,
+      open: latestPrices.XAU.open,
+      high: latestPrices.XAU.high,
+      low: latestPrices.XAU.low,
+      volume: latestPrices.XAU.volume,
+      change: latestPrices.XAU.change,
+      direction: latestPrices.XAU.direction,
+      supertrend: round2(cryptoState.XAU.supertrendValue),
+      supertrendDirection: cryptoState.XAU.supertrendDirection,
+      sma: round2(cryptoState.XAU.sma),
+      lastDailyClose: round2(cryptoState.XAU.lastDailyClose),
     },
     session: getSessionInfo(),
   };
@@ -359,7 +539,6 @@ export async function startTicker() {
   if (onStatusCallback) onStatusCallback("Setting up notifications...");
 
   await loadSavedApiToken();
-  await loadSavedSoundConfig();
   await setupChannels();
 
   // Reset 6-hour session counters
@@ -367,12 +546,13 @@ export async function startTicker() {
   sessionRunning = true;
   crossCount = 0;
 
-  // Bootstrap historical indicators for all 3 assets in parallel
-  if (onStatusCallback) onStatusCallback("Fetching historical data for NIFTY, SENSEX & SOL...");
+  // Bootstrap historical indicators for all assets in parallel
+  if (onStatusCallback) onStatusCallback("Fetching historical data for NIFTY, SENSEX, SOL & XAU...");
   await Promise.all([
     bootstrapIndstocks("NIFTY"),
     bootstrapIndstocks("SENSEX"),
-    bootstrapCoindcx(),
+    bootstrapCryptoSupertrend("SOL"),
+    bootstrapCryptoSupertrend("XAU"),
   ]);
 
   showOrUpdateTickerNotification(getData());
@@ -394,7 +574,7 @@ export async function startTicker() {
   // Connect live price feeds
   if (onStatusCallback) onStatusCallback("Connecting to live market feeds...");
 
-  // 1. INDstocks WebSocket & REST polling for NIFTY & SENSEX
+  // 1. INDstocks WebSocket & REST polling for NIFTY & SENSEX (UNCHANGED)
   const indInstruments = [INSTRUMENTS.NIFTY.wsInstrument, INSTRUMENTS.SENSEX.wsInstrument];
   connectPriceFeed(
     handleIndstocksQuote,
@@ -407,8 +587,11 @@ export async function startTicker() {
   );
   startIndstocksPolling(handleIndstocksRESTPoll, 5000);
 
-  // 2. CoinDCX REST polling for SOL/USDT
-  startCoindcxPolling(handleCoindcxTick, 3000);
+  // 2. CoinDCX REST polling for SOL & XAU live prices (3s)
+  startCoindcxPolling(handleCoindcxMultiTick, 3000);
+
+  // 3. CoinDCX 4H/1D candle polling for Supertrend & SMA (60s)
+  startCandlePolling(60000);
 
   if (onStatusCallback) onStatusCallback("Connected — 6h multi-asset monitoring active");
   if (onDataCallback) onDataCallback(getData());
@@ -425,9 +608,10 @@ export async function stopTicker() {
   disconnectPriceFeed();
   stopIndstocksPolling();
   stopCoindcxPolling();
+  stopCandlePolling();
   await cancelTickerNotification();
 
-  // Reset state
+  // Reset Indian stock state
   for (const label of Object.keys(state)) {
     state[label] = createIndicatorState();
     latestPrices[label] = {
@@ -439,6 +623,21 @@ export async function stopTicker() {
       change: 0,
       direction: "above",
     };
-    lastCandleTs[label] = 0;
   }
+
+  // Reset crypto state
+  for (const key of Object.keys(cryptoState)) {
+    cryptoState[key] = createCryptoIndicatorState();
+    latestPrices[key] = {
+      price: 0,
+      open: 0,
+      high: 0,
+      low: 0,
+      volume: 0,
+      change: 0,
+      direction: "above",
+    };
+  }
+
+  lastCandleTs = { NIFTY: 0, SENSEX: 0 };
 }

@@ -1,58 +1,43 @@
 import { NativeModules, Platform } from "react-native";
 import Constants from "expo-constants";
-import * as ExpoNotifications from "expo-notifications";
-import * as Device from "expo-device";
-import { Audio } from "expo-av";
 
-import storage from "./storage";
+// expo-notifications (and possibly expo-av / expo-device) is not bundled in
+// Expo Go anymore. A static `import` of such a package evaluates
+// `requireNativeModule(...)` at module load, which THROWS when the native
+// module is missing and kills the whole JS bundle — the app then crashes to
+// the home screen. Load these packages lazily and degrade gracefully instead.
+// (Must be literal `require(...)` calls — Metro cannot build for dynamic names.)
+let ExpoNotifications = null;
+try {
+  ExpoNotifications = require("expo-notifications");
+} catch (err) {
+  console.warn("[notifications] expo-notifications unavailable:", err && err.message);
+}
 
-// ---------- In-app audio player & custom sound ----------
+let Device = null;
+try {
+  Device = require("expo-device");
+} catch (err) {
+  console.warn("[notifications] expo-device unavailable:", err && err.message);
+}
+
+let Audio = null;
+try {
+  Audio = require("expo-av").Audio || null;
+} catch (err) {
+  console.warn("[notifications] expo-av unavailable:", err && err.message);
+}
+
+// ---------- In-app audio player ----------
 
 let soundObject = null;
-let customSoundUri = null;
-let customSoundName = null;
-
-const CUSTOM_SOUND_KEY = "NIFTY_ALERT_CUSTOM_SOUND_URI";
-const CUSTOM_SOUND_NAME_KEY = "NIFTY_ALERT_CUSTOM_SOUND_NAME";
-
-export async function loadSavedSoundConfig() {
-  try {
-    const uri = await storage.getItem(CUSTOM_SOUND_KEY);
-    const name = await storage.getItem(CUSTOM_SOUND_NAME_KEY);
-    if (uri) {
-      customSoundUri = uri;
-      customSoundName = name || "Custom Sound";
-    }
-  } catch (err) {
-    console.warn("[Sound] Error loading saved sound:", err.message);
-  }
-}
-
-export async function setCustomSound(uri, name) {
-  customSoundUri = uri || null;
-  customSoundName = name || null;
-  try {
-    if (uri) {
-      await storage.setItem(CUSTOM_SOUND_KEY, uri);
-      if (name) await storage.setItem(CUSTOM_SOUND_NAME_KEY, name);
-    } else {
-      await storage.removeItem(CUSTOM_SOUND_KEY);
-      await storage.removeItem(CUSTOM_SOUND_NAME_KEY);
-    }
-  } catch (err) {
-    console.warn("[Sound] Error saving sound config:", err.message);
-  }
-}
-
-export function getCustomSoundInfo() {
-  return {
-    uri: customSoundUri,
-    name: customSoundName || "Default (notify.mp3)",
-    isDefault: !customSoundUri,
-  };
-}
 
 export async function playAlertSound() {
+  if (!Audio) {
+    console.warn("[Sound] expo-av unavailable — skipping alert sound.");
+    return;
+  }
+
   try {
     await Audio.setAudioModeAsync({
       allowsRecordingIOS: false,
@@ -67,24 +52,13 @@ export async function playAlertSound() {
       soundObject = null;
     }
 
-    const soundSource = customSoundUri
-      ? { uri: customSoundUri }
-      : require("./assets/sounds/notify.mp3");
-
     const { sound } = await Audio.Sound.createAsync(
-      soundSource,
+      require("./assets/sounds/notify.mp3"),
       { shouldPlay: true, volume: 1.0 }
     );
     soundObject = sound;
   } catch (err) {
-    console.warn("[Sound] Failed to play alert sound, falling back to default:", err.message);
-    try {
-      const { sound } = await Audio.Sound.createAsync(
-        require("./assets/sounds/notify.mp3"),
-        { shouldPlay: true, volume: 1.0 }
-      );
-      soundObject = sound;
-    } catch {}
+    console.warn("[Sound] Failed to play alert sound:", err.message);
   }
 }
 
@@ -126,6 +100,11 @@ if (useExpoFallback) {
 // ---------- Permission ----------
 
 async function requestPermission() {
+  if (!ExpoNotifications || !Device) {
+    console.warn("[notifications] expo-notifications unavailable — skipping permission request.");
+    return false;
+  }
+
   if (!Device.isDevice) {
     console.warn("[notifications] Must use a physical device for push notifications.");
     return false;
@@ -149,15 +128,17 @@ async function requestPermission() {
 
 // ---------- Expo-notifications setup ----------
 
-ExpoNotifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+if (ExpoNotifications) {
+  ExpoNotifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+}
 
 const TICKER_NOTIFICATION_ID = "nifty-sensex-ticker";
 const CROSS_ALERT_SOUND = "notify";
@@ -168,7 +149,7 @@ const CROSS_ALERTS_CHANNEL_ID = "cross_alerts_v3";
 export async function setupChannels() {
   await requestPermission();
 
-  if (Platform.OS === "android") {
+  if (ExpoNotifications && Platform.OS === "android") {
     try {
       await ExpoNotifications.deleteNotificationChannelAsync("cross-alerts");
       await ExpoNotifications.deleteNotificationChannelAsync("cross_alerts");
@@ -304,13 +285,34 @@ export async function showOrUpdateTickerNotification(data) {
 
 // ---------- Cross alert notification ----------
 
-export async function showCrossAlert({ label, cross, price, vwap, ema }) {
+export async function showCrossAlert(payload) {
+  const { label, cross, price, vwap, ema, type, message, body: customBody, supertrend, sma } = payload || {};
+
   // Play in-app alert sound via expo-av
   playAlertSound();
 
+  let title;
+  if (type === "supertrend") {
+    title = `${label} Supertrend Flip`;
+  } else if (type === "sma") {
+    title = `${label} SMA Daily Cross`;
+  } else {
+    title = `${label} EMA9/VWAP Cross`;
+  }
+
   const direction = cross === "bullish" ? "crossed ABOVE" : "crossed BELOW";
-  const title = `${label} EMA9/VWAP Cross`;
-  const body = `EMA9 ${direction} VWAP\nPrice ${formatNumber(price)} | VWAP ${formatNumber(vwap)} | EMA9 ${formatNumber(ema)}`;
+
+  let body = customBody || message;
+  if (!body) {
+    if (type === "supertrend") {
+      const flipDir = cross === "bullish" ? "turned BULLISH" : "turned BEARISH";
+      body = `Supertrend ${flipDir}\nPrice ${formatNumber(price)}${supertrend != null ? ` | Supertrend ${formatNumber(supertrend)}` : ""}`;
+    } else if (type === "sma") {
+      body = `Price ${direction} SMA\nPrice ${formatNumber(price)}${sma != null ? ` | SMA ${formatNumber(sma)}` : ""}`;
+    } else {
+      body = `EMA9 ${direction} VWAP\nPrice ${formatNumber(price)} | VWAP ${formatNumber(vwap)} | EMA9 ${formatNumber(ema)}`;
+    }
+  }
 
   if (notifee) {
     await notifee.displayNotification({
@@ -323,8 +325,8 @@ export async function showCrossAlert({ label, cross, price, vwap, ema }) {
         pressAction: { id: "default" },
       },
     });
-  } else {
-    // Expo Go fallback
+  } else if (ExpoNotifications) {
+    // Expo Go / fallback: only when expo-notifications is actually available
     await ExpoNotifications.scheduleNotificationAsync({
       content: {
         title,
@@ -344,8 +346,11 @@ export async function cancelTickerNotification() {
   if (notifee) {
     await notifee.cancelNotification(TICKER_NOTIFICATION_ID);
   }
-  // expo-notifications: dismiss all (only relevant if we ever showed one)
-  await ExpoNotifications.dismissAllNotificationsAsync();
+  if (ExpoNotifications) {
+    try {
+      await ExpoNotifications.dismissAllNotificationsAsync();
+    } catch {}
+  }
 }
 
 // ---------- Foreground event handler ----------

@@ -13,26 +13,29 @@
     "@notifee/react-native": "^9.1.8",
     "@react-native-async-storage/async-storage": "2.2.0",
     "dotenv": "^16.4.5",
-    "expo": "~57.0.0",
+    "expo": "~57.0.20",
     "expo-av": "^16.0.8",
-    "expo-build-properties": "^57.0.16",
+    "expo-build-properties": "~57.0.17",
     "expo-constants": "~57.0.17",
     "expo-dev-client": "~57.0.18",
     "expo-device": "~57.0.1",
     "expo-document-picker": "^57.0.1",
-    "expo-notifications": "~57.0.16",
+    "expo-notifications": "~57.0.17",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
-    "puppeteer-core": "24"
+    "puppeteer-core": "^25.10.0"
   },
   "expo": {
     "doctor": {
       "reactNativeDirectoryCheck": {
-        "exclude": ["@notifee/react-native", "expo-av"]
+        "exclude": [
+          "@notifee/react-native",
+          "expo-av"
+        ]
       }
     }
   }

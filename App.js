@@ -10,7 +10,6 @@ import {
   LogBox,
   Platform,
 } from "react-native";
-import * as DocumentPicker from "expo-document-picker";
 import { API_TOKEN } from "./config";
 import {
   startTicker,
@@ -21,11 +20,7 @@ import {
   onStatus,
   updateIndstocksToken,
 } from "./tickerService";
-import {
-  setCustomSound,
-  getCustomSoundInfo,
-  playAlertSound,
-} from "./notifications";
+import { playAlertSound } from "./notifications";
 
 LogBox.ignoreLogs([
   "[Ticker]",
@@ -50,13 +45,13 @@ function formatVol(v) {
   return v.toFixed(2);
 }
 
-function MarketCard({ label, data, isCrypto = false }) {
+// Market card for Indian indices (NIFTY, SENSEX) — shows VWAP + EMA9
+function IndexCard({ label, data }) {
   if (!data) return null;
   const isUp = data.direction === "above";
   const changeColor = isUp ? "#00c853" : "#ff1744";
   const arrow = isUp ? "▲" : "▼";
   const changeVal = data.change || 0;
-  const prefix = isCrypto ? "$" : "";
 
   return (
     <View style={styles.card}>
@@ -66,7 +61,7 @@ function MarketCard({ label, data, isCrypto = false }) {
       </View>
 
       <Text style={[styles.cardPrice, { color: changeColor }]}>
-        {prefix}{formatNum(data.price, isCrypto)}
+        {formatNum(data.price)}
       </Text>
       <Text style={[styles.cardChange, { color: changeVal >= 0 ? "#00c853" : "#ff1744" }]}>
         {changeVal >= 0 ? "+" : ""}
@@ -77,12 +72,12 @@ function MarketCard({ label, data, isCrypto = false }) {
 
       <View style={styles.indicatorRow}>
         <Text style={styles.indicatorLabel}>VWAP</Text>
-        <Text style={styles.indicatorValue}>{prefix}{formatNum(data.vwap, isCrypto)}</Text>
+        <Text style={styles.indicatorValue}>{formatNum(data.vwap)}</Text>
       </View>
 
       <View style={styles.indicatorRow}>
         <Text style={styles.indicatorLabel}>EMA9</Text>
-        <Text style={styles.indicatorValue}>{prefix}{formatNum(data.ema9, isCrypto)}</Text>
+        <Text style={styles.indicatorValue}>{formatNum(data.ema9)}</Text>
       </View>
 
       <View style={styles.indicatorRow}>
@@ -116,6 +111,99 @@ function MarketCard({ label, data, isCrypto = false }) {
   );
 }
 
+// Market card for crypto (SOL, XAU) — shows Supertrend + SMA
+function CryptoCard({ label, data }) {
+  if (!data) return null;
+  const isBullish = data.supertrendDirection === 1;
+  const changeColor = isBullish ? "#00c853" : "#ff1744";
+  const arrow = isBullish ? "▲" : "▼";
+  const changeVal = data.change || 0;
+
+  // SMA status: is latest daily close above or below SMA?
+  const smaAbove = data.lastDailyClose > data.sma;
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardLabel}>{label}</Text>
+        <Text style={[styles.cardArrow, { color: changeColor }]}>{arrow}</Text>
+      </View>
+
+      <Text style={[styles.cardPrice, { color: changeColor }]}>
+        ${formatNum(data.price, true)}
+      </Text>
+      <Text style={[styles.cardChange, { color: changeVal >= 0 ? "#00c853" : "#ff1744" }]}>
+        {changeVal >= 0 ? "+" : ""}
+        {changeVal.toFixed(2)}%
+      </Text>
+
+      <View style={styles.divider} />
+
+      <View style={styles.indicatorRow}>
+        <Text style={styles.indicatorLabel}>Supertrend (4H)</Text>
+        <Text style={[styles.indicatorValue, { color: isBullish ? "#00c853" : "#ff1744" }]}>
+          ${formatNum(data.supertrend, true)}
+        </Text>
+      </View>
+
+      <View style={styles.indicatorRow}>
+        <Text style={styles.indicatorLabel}>SMA 18 (1D)</Text>
+        <Text style={styles.indicatorValue}>${formatNum(data.sma, true)}</Text>
+      </View>
+
+      <View style={styles.indicatorRow}>
+        <Text style={styles.indicatorLabel}>Vol</Text>
+        <Text style={styles.indicatorValue}>{formatVol(data.volume)}</Text>
+      </View>
+
+      {/* Supertrend direction badge */}
+      <View
+        style={[
+          styles.crossBadge,
+          {
+            backgroundColor: isBullish
+              ? "rgba(0,200,83,0.15)"
+              : "rgba(255,23,68,0.15)",
+          },
+        ]}
+      >
+        <Text
+          style={[
+            styles.crossBadgeText,
+            { color: isBullish ? "#00c853" : "#ff1744" },
+          ]}
+        >
+          {isBullish ? "🟢 Supertrend Bullish" : "🔴 Supertrend Bearish"}
+        </Text>
+      </View>
+
+      {/* SMA status badge */}
+      {data.sma > 0 && (
+        <View
+          style={[
+            styles.crossBadge,
+            {
+              backgroundColor: smaAbove
+                ? "rgba(88,166,255,0.15)"
+                : "rgba(139,148,158,0.15)",
+              marginTop: 4,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.crossBadgeText,
+              { color: smaAbove ? "#58a6ff" : "#8b949e" },
+            ]}
+          >
+            1D Close {smaAbove ? "above" : "below"} SMA
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
 export default function App() {
   const [status, setStatus] = useState("Not started");
   const [running, setRunning] = useState(false);
@@ -123,18 +211,18 @@ export default function App() {
   const [nifty, setNifty] = useState(initialData.NIFTY);
   const [sensex, setSensex] = useState(initialData.SENSEX);
   const [sol, setSol] = useState(initialData.SOL);
+  const [xau, setXau] = useState(initialData.XAU);
   const [session, setSession] = useState(initialData.session);
   const [lastCross, setLastCross] = useState(null);
   const [tokenInput, setTokenInput] = useState("");
   const [showTokenBox, setShowTokenBox] = useState(false);
-  const [soundInfo, setSoundInfo] = useState(getCustomSoundInfo());
 
   useEffect(() => {
-    setSoundInfo(getCustomSoundInfo());
     onData((d) => {
       setNifty(d.NIFTY);
       setSensex(d.SENSEX);
       setSol(d.SOL);
+      setXau(d.XAU);
       setSession(d.session);
       if (d.session) {
         setRunning(d.session.running);
@@ -170,6 +258,7 @@ export default function App() {
     setNifty(current.NIFTY);
     setSensex(current.SENSEX);
     setSol(current.SOL);
+    setXau(current.XAU);
     setSession(current.session);
   }
 
@@ -180,60 +269,76 @@ export default function App() {
     setTokenInput("");
   }
 
-  async function handlePickSound() {
-    try {
-      if (Platform.OS === "web" && typeof document !== "undefined") {
-        const input = document.createElement("input");
-        input.type = "file";
-        input.accept = "audio/*";
-        input.onchange = async (e) => {
-          const file = e.target?.files?.[0];
-          if (file) {
-            const url = URL.createObjectURL(file);
-            await setCustomSound(url, file.name);
-            setSoundInfo(getCustomSoundInfo());
-          }
-        };
-        input.click();
-        return;
-      }
-
-      if (!DocumentPicker || typeof DocumentPicker.getDocumentAsync !== "function") {
-        console.warn("[App] DocumentPicker is unavailable in this environment.");
-        return;
-      }
-
-      const res = await DocumentPicker.getDocumentAsync({
-        type: "audio/*",
-        copyToCacheDirectory: true,
-      });
-
-      if (!res.canceled && res.assets && res.assets.length > 0) {
-        const file = res.assets[0];
-        await setCustomSound(file.uri, file.name);
-        setSoundInfo(getCustomSoundInfo());
-      }
-    } catch (err) {
-      console.warn("[App] Custom sound pick error:", err.message);
-    }
-  }
-
-  async function handleResetSound() {
-    await setCustomSound(null, null);
-    setSoundInfo(getCustomSoundInfo());
-  }
-
-  function handleTestSound() {
-    playAlertSound();
-  }
-
   const isTokenExpired = status.includes("403") || status.includes("expired");
+
+  // Format cross alert detail text based on type
+  function renderCrossDetails() {
+    if (!lastCross) return null;
+    const isCrypto = lastCross.label?.includes("SOL") || lastCross.label?.includes("XAU");
+    const prefix = isCrypto ? "$" : "";
+
+    if (lastCross.type === "supertrend") {
+      return (
+        <>
+          <Text
+            style={[
+              styles.crossAlertBody,
+              { color: lastCross.cross === "bullish" ? "#00c853" : "#ff1744" },
+            ]}
+          >
+            {lastCross.label}: Supertrend flipped{" "}
+            {lastCross.cross === "bullish" ? "BULLISH 🟢" : "BEARISH 🔴"}
+          </Text>
+          <Text style={styles.crossAlertDetails}>
+            Price {prefix}{formatNum(lastCross.price, isCrypto)} | Supertrend {prefix}{formatNum(lastCross.supertrend, isCrypto)}
+          </Text>
+        </>
+      );
+    }
+
+    if (lastCross.type === "sma") {
+      return (
+        <>
+          <Text
+            style={[
+              styles.crossAlertBody,
+              { color: lastCross.cross === "bullish" ? "#00c853" : "#ff1744" },
+            ]}
+          >
+            {lastCross.label}: 1D Candle closed{" "}
+            {lastCross.cross === "bullish" ? "ABOVE" : "below"} SMA
+          </Text>
+          <Text style={styles.crossAlertDetails}>
+            Close {prefix}{formatNum(lastCross.price, isCrypto)} | SMA {prefix}{formatNum(lastCross.sma, isCrypto)}
+          </Text>
+        </>
+      );
+    }
+
+    // Default: EMA/VWAP cross (Indian stocks)
+    return (
+      <>
+        <Text
+          style={[
+            styles.crossAlertBody,
+            { color: lastCross.cross === "bullish" ? "#00c853" : "#ff1744" },
+          ]}
+        >
+          {lastCross.label}: EMA9 crossed{" "}
+          {lastCross.cross === "bullish" ? "ABOVE" : "below"} VWAP
+        </Text>
+        <Text style={styles.crossAlertDetails}>
+          Price {formatNum(lastCross.price)} | VWAP {formatNum(lastCross.vwap)} | EMA9 {formatNum(lastCross.ema)}
+        </Text>
+      </>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
         <Text style={styles.title}>Multi-Asset Screener</Text>
-        <Text style={styles.subtitle}>NIFTY • SENSEX • SOL/USDT Crossover Alert</Text>
+        <Text style={styles.subtitle}>NIFTY • SENSEX • SOL/USDT • XAU/USDT</Text>
 
         {(isTokenExpired || showTokenBox) && (
           <View style={styles.errorBox}>
@@ -264,36 +369,28 @@ export default function App() {
               <Text style={styles.sessionValue}>⏱️ {session.formattedTime}</Text>
             </View>
             <View style={styles.sessionBox}>
-              <Text style={styles.sessionLabel}>Crossovers</Text>
+              <Text style={styles.sessionLabel}>Signals</Text>
               <Text style={styles.sessionValueCount}>⚡ {session.crossCount}</Text>
             </View>
           </View>
         )}
 
+        {/* Indian Indices Row */}
         <View style={styles.cardsRow}>
-          <MarketCard label="NIFTY 50" data={nifty} />
-          <MarketCard label="SENSEX" data={sensex} />
+          <IndexCard label="NIFTY 50" data={nifty} />
+          <IndexCard label="SENSEX" data={sensex} />
         </View>
 
-        <View style={styles.singleCardRow}>
-          <MarketCard label="SOL / USDT" data={sol} isCrypto={true} />
+        {/* Crypto Row */}
+        <View style={styles.cardsRow}>
+          <CryptoCard label="SOL / USDT" data={sol} />
+          <CryptoCard label="XAU / USDT" data={xau} />
         </View>
 
         {lastCross && (
           <View style={styles.crossAlert}>
-            <Text style={styles.crossAlertTitle}>Last Cross Detected</Text>
-            <Text
-              style={[
-                styles.crossAlertBody,
-                { color: lastCross.cross === "bullish" ? "#00c853" : "#ff1744" },
-              ]}
-            >
-              {lastCross.label}: EMA9 crossed{" "}
-              {lastCross.cross === "bullish" ? "ABOVE" : "below"} VWAP
-            </Text>
-            <Text style={styles.crossAlertDetails}>
-              Price {lastCross.label.includes("SOL") ? "$" : ""}{formatNum(lastCross.price, lastCross.label.includes("SOL"))} | VWAP {lastCross.label.includes("SOL") ? "$" : ""}{formatNum(lastCross.vwap, lastCross.label.includes("SOL"))} | EMA9 {lastCross.label.includes("SOL") ? "$" : ""}{formatNum(lastCross.ema, lastCross.label.includes("SOL"))}
-            </Text>
+            <Text style={styles.crossAlertTitle}>Last Signal Detected</Text>
+            {renderCrossDetails()}
             <Text style={styles.crossAlertTime}>{lastCross.time}</Text>
           </View>
         )}
@@ -323,33 +420,11 @@ export default function App() {
         <Text style={styles.status}>{status}</Text>
 
         <Text style={styles.hint}>
-          Tracks NIFTY 50, SENSEX, and SOL/USDT in real-time for 6 hours.
-          Computes VWAP and EMA9 on 5-minute candles. Plays instant sound alerts when any asset's EMA9 crosses
-          VWAP and tracks total crossover count in the persistent top notification panel.
+          Tracks NIFTY 50 & SENSEX (EMA9/VWAP on 5m candles) and SOL/USDT & XAU/USDT
+          (Supertrend on 4H + SMA 20 on 1D). Plays instant sound alerts on crossovers,
+          Supertrend flips, and SMA crosses. 6-hour monitoring session with persistent
+          notification panel.
         </Text>
-
-        <View style={styles.soundCard}>
-          <Text style={styles.soundCardTitle}>🔔 Alarm Sound Settings</Text>
-          <Text style={styles.soundCardStatus}>
-            Current Sound: {soundInfo.name}
-          </Text>
-
-          <View style={styles.soundButtonsRow}>
-            <TouchableOpacity style={styles.soundPickButton} onPress={handlePickSound}>
-              <Text style={styles.soundPickButtonText}>📁 Pick Custom Sound (MP3)</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.soundTestButton} onPress={handleTestSound}>
-              <Text style={styles.soundTestButtonText}>▶️ Test Sound</Text>
-            </TouchableOpacity>
-          </View>
-
-          {!soundInfo.isDefault && (
-            <TouchableOpacity style={styles.soundResetButton} onPress={handleResetSound}>
-              <Text style={styles.soundResetButtonText}>🔄 Reset to Default (notify.mp3)</Text>
-            </TouchableOpacity>
-          )}
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -412,10 +487,6 @@ const styles = StyleSheet.create({
     gap: 12,
     width: "100%",
     marginBottom: 12,
-  },
-  singleCardRow: {
-    width: "100%",
-    marginBottom: 16,
   },
   card: {
     flex: 1,
@@ -581,65 +652,5 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 16,
     marginBottom: 20,
-  },
-  soundCard: {
-    width: "100%",
-    backgroundColor: "#161b22",
-    borderRadius: 12,
-    padding: 16,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: "#30363d",
-    alignItems: "center",
-  },
-  soundCardTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#f0f6fc",
-    marginBottom: 4,
-  },
-  soundCardStatus: {
-    fontSize: 12,
-    color: "#8b949e",
-    marginBottom: 12,
-  },
-  soundButtonsRow: {
-    flexDirection: "row",
-    gap: 10,
-    width: "100%",
-    justifyContent: "center",
-  },
-  soundPickButton: {
-    flex: 1,
-    backgroundColor: "#1f6feb",
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  soundPickButtonText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  soundTestButton: {
-    backgroundColor: "#238636",
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  soundTestButtonText: {
-    color: "#ffffff",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  soundResetButton: {
-    marginTop: 10,
-    paddingVertical: 6,
-  },
-  soundResetButtonText: {
-    color: "#f85149",
-    fontSize: 12,
   },
 });
